@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上传视频 · yowat</title>
+<meta name="description" content="登录后把视频拖进来，浏览器里自动压好，传完等一分钟就能播。">
+<meta name="theme-color" content="#0d0b23">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/css/main.css">
+<style>
+    /* 只属于上传页的几块：账号条、阶段进度、结果卡 */
+    .who {
+        display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+        font-size: .88rem;
+    }
+    .who__name { font-weight: 700; color: var(--text, #fff); }
+    .who__quota { color: var(--muted, #9a97b8); font-size: .82rem; }
+    .who__spacer { flex: 1 1 auto; }
+
+    .auth-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+    .auth-row .btn { flex: 1 1 140px; }
+
+    .job { margin-top: 18px; }
+    .job__head {
+        display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+        margin-bottom: 10px;
+    }
+    .job__stage { font-weight: 700; font-size: .94rem; }
+    .job__note { color: var(--muted, #9a97b8); font-size: .8rem; }
+    .job__steps { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .job__step {
+        font-size: .74rem; padding: 4px 10px; border-radius: 999px;
+        border: 1px solid var(--line, rgba(255,255,255,.12));
+        color: var(--muted, #9a97b8);
+    }
+    .job__step.is-on { color: #0d0b23; background: var(--brand-1, #7c5cff); border-color: transparent; font-weight: 700; }
+    .job__step.is-done { color: #7ef0b0; border-color: rgba(126,240,176,.4); }
+
+    .progress.is-idle .progress__bar { width: 30% !important; animation: ywSlide 1.2s ease-in-out infinite alternate; }
+    @keyframes ywSlide { from { margin-left: 0; } to { margin-left: 70%; } }
+
+    .result-links { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+    .result-link {
+        display: flex; align-items: center; gap: 10px;
+        padding: 11px 14px; border-radius: 12px;
+        border: 1px solid var(--line, rgba(255,255,255,.12));
+        background: rgba(255,255,255,.03);
+        font-size: .86rem;
+    }
+    .result-link b { flex: 1 1 auto; font-weight: 600; word-break: break-all; }
+
+    .steps-list { margin: 0; padding-left: 18px; line-height: 2; font-size: .86rem; color: var(--muted, #9a97b8); }
+    .steps-list b { color: var(--text, #fff); }
+</style>
+</head>
+<body>
+
+<div class="bg"></div>
+
+<header class="nav">
+    <div class="wrap nav__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <nav class="nav__links">
+            <a class="nav__link" href="index.html">首页</a>
+            <a class="nav__link" href="index.html#videos">视频广场</a>
+            <a class="nav__link is-active" href="upload.html">上传</a>
+            <a class="nav__link" href="docs.html">接口文档</a>
+            <a class="btn btn--primary btn--sm nav__cta" href="index.html#videos">看视频</a>
+        </nav>
+    </div>
+</header>
+
+<main class="wrap page">
+    <div class="crumb">
+        <a href="index.html">首页</a><span class="sep">/</span>
+        <span>上传视频</span>
+    </div>
+
+    <div style="max-width:720px;margin-bottom:8px">
+        <h1 class="section__title" style="font-size:1.9rem">上传视频</h1>
+        <p class="section__sub" style="margin-top:10px;line-height:1.8">
+            登录后把视频拖进来。压缩在<b>你自己的浏览器里</b>完成，传上去的只有 360p 和 240p 两个小文件，
+            高清原片不会离开你的电脑。
+        </p>
+    </div>
+
+    <div class="upload-layout">
+
+        <!-- ============ 左：账号 → 选文件 → 上传 ============ -->
+        <div>
+
+            <!-- ① 未登录 -->
+            <div class="panel" id="authPanel" hidden>
+                <div class="panel__title">先登录</div>
+                <p class="disk__desc" style="margin-bottom:16px">
+                    用户名 4~20 位字母/数字/下划线，密码至少 8 位。第一次用就点「注册新账号」，
+                    不需要邮箱，也不发验证码。
+                </p>
+                <form class="form" id="authForm" autocomplete="on">
+                    <div class="field">
+                        <label class="field__label" for="username"><span>用户名</span></label>
+                        <input class="input" id="username" name="username" autocomplete="username"
+                               maxlength="20" placeholder="例如 ruolin">
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="password"><span>密码</span></label>
+                        <input class="input" id="password" name="password" type="password"
+                               autocomplete="current-password" maxlength="128" placeholder="至少 8 位">
+                    </div>
+                    <div class="auth-row">
+                        <button class="btn btn--primary" id="btnLogin" type="submit">登录</button>
+                        <button class="btn btn--ghost" id="btnRegister" type="button">注册新账号</button>
+                    </div>
+                </form>
+                <div class="alert alert--err" id="authErr"></div>
+            </div>
+
+            <!-- ② 已登录 -->
+            <div class="panel" id="whoPanel" hidden>
+                <div class="who">
+                    <span>已登录 <span class="who__name" id="whoName">—</span></span>
+                    <span class="who__quota" id="whoQuota">—</span>
+                    <span class="who__spacer"></span>
+                    <button class="btn btn--ghost btn--sm" id="btnLogout" type="button">退出</button>
+                </div>
+            </div>
+
+            <!-- ③ 上传区 -->
+            <div id="uploadBox" hidden>
+
+                <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入视频文件" style="margin-top:18px">
+                    <div>
+                        <div class="dropzone__icon">⬆</div>
+                        <h3>把视频拖到这里</h3>
+                        <p>或者点击选择文件</p>
+                        <p class="dropzone__hint">MP4 / WebM · 220MB 以内 · 手机上也能传</p>
+                    </div>
+                </div>
+                <input type="file" id="file" accept="video/mp4,video/webm,.mp4,.webm" class="sr-only">
+
+                <div class="picked" id="picked">
+                    <div class="picked__box">
+                        <div class="picked__thumb"><video id="preview" muted playsinline preload="metadata"></video></div>
+                        <div class="picked__info">
+                            <div class="picked__name" id="pickedName">—</div>
+                            <div class="picked__size" id="pickedMeta">—</div>
+                        </div>
+                        <button class="btn btn--ghost btn--sm" id="clearFile" type="button">移除</button>
+                    </div>
+                </div>
+
+                <div class="alert alert--err" id="fileErr"></div>
+
+                <div class="form" style="margin-top:24px">
+                    <div class="field">
+                        <label class="field__label" for="fTitle">
+                            <span>视频标题 <span style="color:#e52e71">*</span></span>
+                            <span class="field__count" id="titleCount">0 / 50</span>
+                        </label>
+                        <input class="input" id="fTitle" maxlength="50" placeholder="给视频起个名字，最长 50 字">
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="fDesc">
+                            <span>视频简介</span>
+                            <span class="field__count" id="descCount">0 / 200</span>
+                        </label>
+                        <textarea class="textarea" id="fDesc" maxlength="200" placeholder="说说这个视频讲的是什么，最长 200 字"></textarea>
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="fTags">
+                            <span>标签</span>
+                            <span class="field__count">用逗号分隔，最多 5 个</span>
+                        </label>
+                        <input class="input" id="fTags" placeholder="例如：MV, 音乐, 动画">
+                    </div>
+
+                    <button class="btn btn--primary btn--block" id="submit" type="button" style="margin-top:4px">
+                        开始上传
+                    </button>
+
+                    <!-- 进度 -->
+                    <div class="job" id="jobPanel" hidden>
+                        <div class="job__head">
+                            <span class="job__stage" id="stageText">准备中</span>
+                            <span class="job__note" id="stageNote"></span>
+                        </div>
+                        <div class="progress is-idle" id="progress"><div class="progress__bar" id="progressBar"></div></div>
+                        <div class="job__steps">
+                            <span class="job__step" id="step1">1 压缩 360p</span>
+                            <span class="job__step" id="step2">2 压缩 240p</span>
+                            <span class="job__step" id="step3">3 上传</span>
+                            <span class="job__step" id="step4">4 等待上线</span>
+                        </div>
+                    </div>
+
+                    <div class="alert alert--ok" id="okMsg"></div>
+                    <div class="alert alert--err" id="errMsg"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ 右：说明 + 结果 ============ -->
+        <aside>
+            <div class="panel" style="margin-top:0">
+                <div class="panel__title">上传之后会发生什么</div>
+                <ol class="steps-list">
+                    <li>浏览器用 ffmpeg 把视频压成 <b>360p</b> 和 <b>240p</b>，顺便抽一张封面</li>
+                    <li>两个小文件和封面一起提交进站点仓库（只存低清，不存原片）</li>
+                    <li>Cloudflare Pages 自动重新构建，<b>大约 1~2 分钟</b>后视频就能播</li>
+                </ol>
+                <p style="margin-top:14px;font-size:.8rem;color:var(--muted);line-height:1.8">
+                    压缩要花点时间，取决于视频长度和你的电脑。4 分钟的视频大概 1~3 分钟，
+                    期间<b>别关这个页面</b>。手机上会更慢，建议连 WiFi。
+                </p>
+            </div>
+
+            <div class="panel" id="resultPanel" hidden>
+                <div class="panel__title">上传成功</div>
+                <div class="kv">
+                    <div class="kv__row">
+                        <div class="kv__k">编号</div>
+                        <div class="kv__v" id="resId">—</div>
+                    </div>
+                    <div class="kv__row">
+                        <div class="kv__k">状态</div>
+                        <div class="kv__v" id="resStatus">构建中</div>
+                    </div>
+                </div>
+                <div class="result-links">
+                    <div class="result-link">
+                        <b id="resLink">/video/—</b>
+                        <button class="copy" id="btnCopyLink" type="button">复制</button>
+                    </div>
+                    <a class="btn btn--ghost btn--sm" id="resOpen" href="#" target="_blank" rel="noopener">打开播放页</a>
+                </div>
+                <p style="margin-top:14px;font-size:.8rem;color:var(--muted);line-height:1.8">
+                    刚传完文件还在构建，播放页可能暂时显示「文件还没到」。
+                    等一分钟刷新就好 —— 播放链接不会变。
+                </p>
+            </div>
+
+            <div class="panel">
+                <div class="hint">
+                    <span>💡</span>
+                    <span>
+                        转码引擎是 <code>ffmpeg.wasm</code>，约 24MB，第一次打开这个页面要下载一次，
+                        之后浏览器会缓存。压不动、报内存不足的话，把视频剪短一点再试。
+                    </span>
+                </div>
+            </div>
+        </aside>
+    </div>
+</main>
+
+<footer class="footer">
+    <div class="wrap footer__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <div class="footer__links">
+            <a href="index.html">首页</a>
+            <a href="index.html#videos">视频广场</a>
+            <a href="docs.html">接口文档</a>
+        </div>
+        <div class="footer__copy">让每一刻都被看见 · yowat</div>
+    </div>
+</footer>
+
+<script src="assets/js/vendor/ffmpeg.min.js"></script>
+<script src="assets/js/compress.js"></script>
+<script>
+Yowat.ready(function () {
+    "use strict";
+
+    /* =========================================================
+       常量与元素
+       ========================================================= */
+
+    var API = {
+        me: "/api/auth/me",
+        login: "/api/auth/login",
+        register: "/api/auth/register",
+        logout: "/api/auth/logout",
+        upload: "/api/upload"
+    };
+
+    var MAX_SIZE = (window.YowatCompress ? YowatCompress.MAX_SOURCE : 220 * 1024 * 1024);
+
+    var state = {
+        me: null,
+        usage: null,
+        quota: null,
+        file: null,
+        duration: 0,
+        busy: false
+    };
+
+    var el = {};
+    [
+        "authPanel", "whoPanel", "uploadBox", "authErr", "authForm", "username", "password",
+        "btnLogin", "btnRegister", "btnLogout", "whoName", "whoQuota",
+        "dropzone", "file", "picked", "preview", "clearFile", "pickedName", "pickedMeta",
+        "fileErr", "fTitle", "fDesc", "fTags", "titleCount", "descCount", "submit",
+        "jobPanel", "stageText", "stageNote", "progress", "progressBar",
+        "step1", "step2", "step3", "step4",
+        "okMsg", "errMsg", "resultPanel", "resId", "resStatus", "resLink", "resOpen", "btnCopyLink"
+    ].forEach(function (id) { el[id] = document.getElementById(id); });
+
+    /* =========================================================
+       小工具
+       ========================================================= */
+
+    function msg(node, text, kind) {
+        node.textContent = text || "";
+        node.classList.toggle("is-on", !!text);
+        if (kind) node.className = "alert alert--" + kind + (text ? " is-on" : "");
+    }
+
+    function clearMsgs() {
+        msg(el.authErr, "");
+        msg(el.fileErr, "");
+        msg(el.okMsg, "");
+        msg(el.errMsg, "");
+    }
+
+    function fmtBytes(n) {
+        var v = Number(n) || 0;
+        var units = ["B", "KB", "MB", "GB"];
+        var i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return (i === 0 ? Math.round(v) : v.toFixed(1)) + " " + units[i];
+    }
+
+    function fmtDur(sec) {
+        var s = Math.max(0, Math.round(Number(sec) || 0));
+        var m = Math.floor(s / 60);
+        return m ? m + " 分 " + (s % 60) + " 秒" : s + " 秒";
+    }
+
+    /* =========================================================
+       账号
+       ========================================================= */
+
+    function showAuth() {
+        el.authPanel.hidden = false;
+        el.whoPanel.hidden = true;
+        el.uploadBox.hidden = true;
+    }
+
+    function enter(data) {
+        state.me = data.user;
+        state.usage = data.usage || { videos: 0, bytes: 0 };
+        state.quota = data.quota || { videos: 20, bytes: 209715200 };
+
+        el.authPanel.hidden = true;
+        el.whoPanel.hidden = false;
+        el.uploadBox.hidden = false;
+        el.whoName.textContent = state.me.username;
+        renderQuota();
+
+        if (!YowatCompress || !YowatCompress.supported()) {
+            msg(el.errMsg, "这个浏览器不支持本地转码（需要 WebAssembly + Worker）。换 Chrome、Edge 或新版 Safari 再来。", "err");
+        }
+    }
+
+    function renderQuota() {
+        if (!state.quota) return;
+        el.whoQuota.textContent =
+            "已用 " + state.usage.videos + " / " + state.quota.videos + " 个 · " +
+            fmtBytes(state.usage.bytes) + " / " + fmtBytes(state.quota.bytes);
+    }
+
+    fetch(API.me, { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (j && j.data && j.data.user) enter(j.data);
+            else showAuth();
+        })
+        .catch(function () {
+            showAuth();
+            msg(el.authErr, "连不上服务器，检查一下网络再刷新", "err");
+        });
+
+    function doAuth(mode) {
+        var u = el.username.value.trim();
+        var p = el.password.value;
+        if (!u || !p) return msg(el.authErr, "用户名和密码都要填", "err");
+
+        el.btnLogin.disabled = true;
+        el.btnRegister.disabled = true;
+        msg(el.authErr, "");
+
+        fetch(mode === "register" ? API.register : API.login, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ username: u, password: p })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                el.btnLogin.disabled = false;
+                el.btnRegister.disabled = false;
+                if (j && j.code === 0 && j.data) {
+                    el.password.value = "";
+                    enter(j.data);
+                } else {
+                    msg(el.authErr, (j && j.message) || "登录失败", "err");
+                }
+            })
+            .catch(function () {
+                el.btnLogin.disabled = false;
+                el.btnRegister.disabled = false;
+                msg(el.authErr, "网络错误，再试一次", "err");
+            });
+    }
+
+    el.authForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        doAuth("login");
+    });
+    el.btnRegister.addEventListener("click", function () { doAuth("register"); });
+
+    el.btnLogout.addEventListener("click", function () {
+        fetch(API.logout, { method: "POST", credentials: "same-origin" })
+            .catch(function () { /* 失败也当退出成功，cookie 可能已经没了 */ })
+            .then(function () {
+                state.me = null;
+                showAuth();
+                clearMsgs();
+            });
+    });
+
+    /* =========================================================
+       选文件
+       ========================================================= */
+
+    el.dropzone.addEventListener("click", function () { el.file.click(); });
+    el.dropzone.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.file.click(); }
+    });
+
+    ["dragenter", "dragover"].forEach(function (t) {
+        el.dropzone.addEventListener(t, function (e) {
+            e.preventDefault();
+            el.dropzone.classList.add("is-drag");
+        });
+    });
+    ["dragleave", "drop"].forEach(function (t) {
+        el.dropzone.addEventListener(t, function (e) {
+            e.preventDefault();
+            el.dropzone.classList.remove("is-drag");
+        });
+    });
+    el.dropzone.addEventListener("drop", function (e) {
+        var f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) takeFile(f);
+    });
+    el.file.addEventListener("change", function () {
+        if (el.file.files[0]) takeFile(el.file.files[0]);
+    });
+
+    /* 别让浏览器把拖到页面别处的视频直接打开 */
+    window.addEventListener("dragover", function (e) { e.preventDefault(); });
+    window.addEventListener("drop", function (e) { e.preventDefault(); });
+
+    function takeFile(file) {
+        msg(el.fileErr, "");
+
+        var okType = /^video\//.test(file.type) || /\.(mp4|webm)$/i.test(file.name);
+        if (!okType) return msg(el.fileErr, "只支持 MP4 / WebM", "err");
+        if (!file.size) return msg(el.fileErr, "这个文件是空的", "err");
+        if (file.size > MAX_SIZE) {
+            return msg(el.fileErr, "文件 " + fmtBytes(file.size) + " 太大了，本地转码最多 " +
+                fmtBytes(MAX_SIZE) + "。剪短一点或换个小的再传", "err");
+        }
+
+        state.file = file;
+        state.duration = 0;
+
+        if (el.preview.src) URL.revokeObjectURL(el.preview.src);
+        el.preview.src = URL.createObjectURL(file);
+
+        el.pickedName.textContent = file.name;
+        el.pickedMeta.textContent = fmtBytes(file.size);
+        el.picked.classList.add("is-on");
+
+        el.preview.addEventListener("loadedmetadata", function handler() {
+            el.preview.removeEventListener("loadedmetadata", handler);
+            state.duration = Math.round(el.preview.duration) || 0;
+            el.pickedMeta.textContent = fmtBytes(file.size) + " · " + fmtDur(state.duration) +
+                " · " + (el.preview.videoWidth || 0) + "×" + (el.preview.videoHeight || 0);
+
+            if (YowatCompress) {
+                var est = YowatCompress.estimate(state.duration, YowatCompress.isolated());
+                if (est) msg(el.fileErr, "预计压缩耗时 " + est + "，期间请别关页面", "warn");
+            }
+        });
+
+        if (!el.fTitle.value) {
+            el.fTitle.value = file.name.replace(/\.(mp4|webm)$/i, "").slice(0, 50);
+        }
+        syncCounts();
+    }
+
+    el.clearFile.addEventListener("click", function () {
+        state.file = null;
+        el.file.value = "";
+        el.picked.classList.remove("is-on");
+        msg(el.fileErr, "");
+        el.progressBar.style.width = "0%";
+    });
+
+    /* 字数统计 */
+    function syncCounts() {
+        el.titleCount.textContent = el.fTitle.value.length + " / 50";
+        el.descCount.textContent = el.fDesc.value.length + " / 200";
+    }
+    el.fTitle.addEventListener("input", syncCounts);
+    el.fDesc.addEventListener("input", syncCounts);
+    syncCounts();
+
+    /* =========================================================
+       进度显示
+       ========================================================= */
+
+    var STEPS = { 1: el.step1, 2: el.step2, 3: el.step3, 4: el.step4 };
+    var stepNow = 0;
+
+    function resetSteps() {
+        stepNow = 0;
+        Object.keys(STEPS).forEach(function (k) {
+            STEPS[k].className = "job__step";
+        });
+    }
+
+    function markStep(n) {
+        if (stepNow) {
+            var prev = STEPS[stepNow];
+            if (prev) prev.className = "job__step is-done";
+        }
+        stepNow = n;
+        var cur = STEPS[n];
+        if (cur) cur.className = "job__step is-on";
+    }
+
+    function setStage(text, ratio) {
+        el.jobPanel.hidden = false;
+        el.stageText.textContent = text;
+
+        if (ratio < 0 || typeof ratio !== "number") {
+            el.progress.classList.add("is-idle");
+            el.progressBar.style.width = "30%";
+            el.stageNote.textContent = "";
+        } else {
+            el.progress.classList.remove("is-idle");
+            var pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+            el.progressBar.style.width = pct + "%";
+            el.stageNote.textContent = pct + "%";
+        }
+    }
+
+    function finishStage(text) {
+        el.progress.classList.remove("is-idle");
+        el.progressBar.style.width = "100%";
+        el.stageText.textContent = text;
+        el.stageNote.textContent = "100%";
+    }
+
+    function setBusy(on) {
+        state.busy = on;
+        el.submit.disabled = on;
+        el.submit.textContent = on ? "正在处理，别关页面…" : "开始上传";
+        el.clearFile.disabled = on;
+    }
+
+    /* =========================================================
+       提交
+       ========================================================= */
+
+    el.submit.addEventListener("click", function () {
+        if (state.busy) return;
+        var title = el.fTitle.value.trim();
+
+        if (!state.file) return msg(el.fileErr, "先选一个视频", "err");
+        if (!title) return msg(el.errMsg, "标题不能为空", "err");
+        if (!YowatCompress || !YowatCompress.supported()) {
+            return msg(el.errMsg, "这个浏览器不支持本地转码，换 Chrome / Edge / 新版 Safari", "err");
+        }
+
+        msg(el.fileErr, "");
+        msg(el.okMsg, "");
+        msg(el.errMsg, "");
+        el.resultPanel.hidden = true;
+
+        setBusy(true);
+        resetSteps();
+        el.jobPanel.hidden = false;
+
+        var t0 = Date.now();
+
+        setStage("准备转码引擎", -1);
+        markStep(1);
+
+        YowatCompress.compress(state.file, {
+            onNote: function (t) { el.stageNote.textContent = t; },
+            onStage: function (text, ratio) {
+                if (/360p/.test(text)) markStep(1);
+                else if (/240p/.test(text)) markStep(2);
+                else if (/封面|读取|内存/.test(text)) { /* 保持当前步骤 */ }
+                setStage(text, ratio);
+            }
+        })
+            .then(function (out) {
+                var cost = ((Date.now() - t0) / 1000).toFixed(0);
+                setStage("压缩完成，用时 " + cost + " 秒，开始上传", 1);
+                markStep(3);
+
+                return postUpload(out, title).then(function (res) {
+                    if (!res || res.code !== 0) {
+                        throw new Error((res && res.message) || "服务器没返回结果");
+                    }
+                    return { out: out, res: res };
+                });
+            })
+            .then(function (r) {
+                markStep(4);
+                finishStage("已提交，等构建上线");
+                showResult(r.res.data, r.out);
+                setBusy(false);
+            })
+            .catch(function (err) {
+                setBusy(false);
+                el.progress.classList.remove("is-idle");
+                el.stageText.textContent = "中断了";
+                el.stageNote.textContent = "";
+                msg(el.errMsg, (err && err.message) || "上传失败", "err");
+            });
+    });
+
+    /** 用 XHR 是为了拿到上传百分比，fetch 没有这个事件 */
+    function postUpload(out, title) {
+        return new Promise(function (resolve, reject) {
+            var fd = new FormData();
+            fd.append("title", title);
+            fd.append("description", el.fDesc.value.trim());
+            fd.append("tags", el.fTags.value.trim());
+            fd.append("duration", String((out.source && out.source.duration) || state.duration || 0));
+            fd.append("v360", out["360"].blob, "360.mp4");
+            fd.append("v240", out["240"].blob, "240.mp4");
+            if (out.cover && out.cover.blob) fd.append("cover", out.cover.blob, "cover.jpg");
+
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", API.upload, true);
+            xhr.withCredentials = true;
+
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    setStage("上传 " + fmtBytes(e.loaded) + " / " + fmtBytes(e.total), e.loaded / e.total);
+                }
+            };
+
+            xhr.onload = function () {
+                var j = null;
+                try { j = JSON.parse(xhr.responseText); } catch (e) { /* 下面统一报错 */ }
+                if (j) resolve(j);
+                else reject(new Error("服务器返回了看不懂的东西（HTTP " + xhr.status + "）"));
+            };
+
+            xhr.onerror = function () { reject(new Error("上传中断，检查网络后重试")); };
+            xhr.onabort = function () { reject(new Error("上传被取消")); };
+
+            xhr.send(fd);
+        });
+    }
+
+    /* =========================================================
+       结果
+       ========================================================= */
+
+    function showResult(data, out) {
+        var link = location.origin + "/video/" + data.video_id;
+
+        el.resId.textContent = "#" + data.video_id;
+        el.resStatus.textContent = "构建中（约 1~2 分钟）";
+        el.resLink.textContent = "/video/" + data.video_id;
+        el.resOpen.href = "/video/" + data.video_id;
+        el.resultPanel.hidden = false;
+
+        el.btnCopyLink.onclick = function () {
+            if (Yowat.copy) Yowat.copy(link);
+            else if (navigator.clipboard) navigator.clipboard.writeText(link);
+            el.btnCopyLink.textContent = "已复制";
+            setTimeout(function () { el.btnCopyLink.textContent = "复制"; }, 1500);
+        };
+
+        var sizes = [];
+        if (out && out["360"]) sizes.push("360p " + fmtBytes(out["360"].size));
+        if (out && out["240"]) sizes.push("240p " + fmtBytes(out["240"].size));
+
+        msg(el.okMsg,
+            "上传成功：#" + data.video_id + "（" + sizes.join(" · ") + "）。" +
+            "文件正在构建，1~2 分钟后打开 /video/" + data.video_id + " 就能看了。",
+            "ok");
+
+        /* 配额就地更新，不用重新登录 */
+        if (state.usage) {
+            state.usage.videos += 1;
+            state.usage.bytes += (data.size || 0);
+            renderQuota();
+        }
+
+        el.resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+});
+</script>
+
+</body>
+</html>

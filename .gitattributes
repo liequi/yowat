@@ -1,0 +1,15 @@
+# 统一用 LF，避免 Windows 上把行尾转成 CRLF 导致每次 diff 全变
+* text=auto eol=lf
+
+# 明确的二进制：不要做行尾转换，也不要尝试 diff
+*.mp4  binary
+*.webm binary
+*.mov  binary
+*.wasm binary
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary

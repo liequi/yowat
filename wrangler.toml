@@ -1,0 +1,23 @@
+# yowat · Cloudflare Pages 配置
+# 部署前必读：DEPLOY.md
+
+name = "yowat"
+compatibility_date = "2026-11-01"
+
+# 站点根目录就是当前目录（index.html 在这一层）
+pages_build_output_dir = "."
+
+# ---------------- D1 数据库 ----------------
+# database_id 需要用 `npx wrangler d1 create yowat-db` 生成后填进来
+[[d1_databases]]
+binding = "DB"
+database_name = "yowat-db"
+database_id = "450ce2d1-8507-47b4-93d6-7428c26963ac"
+
+# ---------------- 可选：以后视频放 R2 ----------------
+# 目前视频按静态资源跟着 Pages 一起部署（免费，单文件 ≤ 25MB）。
+# 如果视频变大变多，再开通 R2（10GB 存储 + 出站流量免费），取消下面注释：
+#
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "yowat-video"

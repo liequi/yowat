@@ -1,0 +1,18 @@
+# yowat · 响应头
+# ---------------------------------------------------------------
+# 只给上传页开跨域隔离。ffmpeg.wasm 的多线程 core 需要
+# SharedArrayBuffer，而它要求页面处于 crossOriginIsolated 状态。
+#
+# 为什么只给 /upload：COEP: require-corp 会拦截页面里所有没有
+# CORP/CORS 头的跨域资源。上传页只用本地资源，安全；首页有外链
+# 字体和图片，绝不能加。
+#
+# 单线程 core 不加这两个头也能跑，加了只是让它能吃到多线程。
+
+/upload
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/upload.html
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

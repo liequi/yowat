@@ -1,0 +1,32 @@
+# .assetsignore —— 不当作静态资源上传的文件
+# （functions/ 由 Pages 单独处理，不会被发布成静态文件；这里再兜一层）
+
+functions
+node_modules
+.wrangler
+.git
+.gitignore
+
+# 只在仓库里有意义，不需要对外可访问
+DEPLOY.md
+schema.sql
+migrations/
+wrangler.toml
+videos/README.md
+tests
+tools/
+package.json
+package-lock.json
+
+# 高清原片的暂存区：上传页把原始文件写在这里，npm run pack 压完就删。
+# 永远不进 CDN —— 站点上只有 -360.mp4 / -240.mp4 两个小文件。
+_incoming/
+
+# 历史遗留的归档目录（老的 --replace 用过），同样不发布
+_originals/
+
+# 本地临时文件
+*.log
+*.bak
+_*.html
+*.tmp.mp4

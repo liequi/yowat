@@ -1,0 +1,17 @@
+# 依赖与本地构建缓存
+node_modules/
+.wrangler/
+
+# 高清原片暂存区：只在本机存在，压完即删，不进仓库
+_incoming/
+_originals/
+
+# 本地临时文件
+*.log
+*.bak
+*.tmp.mp4
+_*.html
+
+# 系统文件
+.DS_Store
+Thumbs.db

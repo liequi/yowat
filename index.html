@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yowat · 视频分享平台</title>
+<meta name="description" content="yowat 是一个轻量的视频分享平台：上传、播放、下载，一条链接就够。">
+<meta name="theme-color" content="#0d0b23">
+<meta property="og:title" content="yowat · 视频分享平台">
+<meta property="og:description" content="分享精彩，记录生活。上传、播放、下载，一条链接就够。">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+
+<div class="bg"></div>
+
+<!-- ============ 导航 ============ -->
+<header class="nav">
+    <div class="wrap nav__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <nav class="nav__links">
+            <a class="nav__link is-active" href="index.html">首页</a>
+            <a class="nav__link" href="#videos">视频广场</a>
+            <a class="nav__link" href="upload.html">上传</a>
+            <a class="nav__link" href="docs.html">接口文档</a>
+            <a class="btn btn--primary btn--sm nav__cta" href="upload.html">＋ 上传视频</a>
+        </nav>
+    </div>
+</header>
+
+<main class="wrap">
+
+    <!-- ============ Hero ============ -->
+    <section class="hero">
+        <div class="hero__grid">
+            <div>
+                <span class="eyebrow"><span class="dot"></span>YOWAT · 视频分享平台</span>
+                <h1>分享精彩<br><span class="grad-text">记录生活</span></h1>
+                <p class="hero__desc">
+                    一个干净的视频小站：上传即生成链接，打开就能播，需要时还能一键下载原片。
+                    没有广告，没有推荐算法，只有你和你的画面。
+                </p>
+                <div class="hero__actions">
+                    <a class="btn btn--primary" href="upload.html">🚀 上传视频</a>
+                    <a class="btn btn--ghost" href="docs.html">📄 接口文档</a>
+                </div>
+                <div class="hero__stats">
+                    <div class="hero__stat">
+                        <div class="num" id="statVideos">0</div>
+                        <div class="label">视频总数</div>
+                    </div>
+                    <div class="hero__stat">
+                        <div class="num" id="statDuration">00:00</div>
+                        <div class="label">总时长</div>
+                    </div>
+                    <div class="hero__stat">
+                        <div class="num" id="statSize">0 MB</div>
+                        <div class="label">占用空间</div>
+                    </div>
+                    <div class="hero__stat">
+                        <div class="num" id="statTags">0</div>
+                        <div class="label">内容标签</div>
+                    </div>
+                </div>
+            </div>
+            <div id="featured"></div>
+        </div>
+
+        <div class="notice">
+            <span class="notice__tag">公告</span>
+            <span class="notice__text" id="noticeText">平台刚刚起步 · 上传接口已开放，详见「接口文档」 · 视频链接格式：/video/{video_id} · 更多玩法陆续上线</span>
+        </div>
+    </section>
+
+    <!-- ============ 视频广场 ============ -->
+    <section class="section" id="videos">
+        <div class="section__head">
+            <div>
+                <h2 class="section__title">视频广场</h2>
+                <p class="section__sub" id="resultCount">正在加载…</p>
+            </div>
+            <div class="section__tools">
+                <label class="search" style="width:264px">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+                    </svg>
+                    <input id="q" type="search" placeholder="搜索标题或标签" aria-label="搜索视频">
+                </label>
+                <select class="select" id="sort" aria-label="排序方式">
+                    <option value="new">最新发布</option>
+                    <option value="views">最多播放</option>
+                    <option value="long">时长最长</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="chips" id="chips"></div>
+
+        <div class="grid" id="grid" style="margin-top:24px"></div>
+    </section>
+
+    <!-- ============ 接口速览 ============ -->
+    <section class="section" id="api">
+        <div class="section__head">
+            <div>
+                <h2 class="section__title">接口速览</h2>
+                <p class="section__sub">播放页只负责播放；下载是接口，直接访问 URL 就拿到文件</p>
+            </div>
+            <a class="btn btn--ghost btn--sm" href="docs.html">查看完整文档 →</a>
+        </div>
+
+        <div class="api-cards">
+            <div class="api-card">
+                <div class="api-card__head">
+                    <span class="method method--post">POST</span>
+                    <span class="api-card__title">上传视频</span>
+                </div>
+                <div class="api-card__path">/<wbr>api/<wbr>upload/<wbr>{视频标题}/<wbr>{视频简介}/</div>
+                <p class="api-card__desc">把视频拖进网页中间就能完成上传，支持 MP4 / WebM，单个文件最大 500MB。</p>
+                <a class="btn btn--ghost btn--sm btn--block" href="upload.html">打开上传页</a>
+            </div>
+
+            <div class="api-card">
+                <div class="api-card__head">
+                    <span class="method method--get">GET</span>
+                    <span class="api-card__title">视频播放页</span>
+                </div>
+                <div class="api-card__path">/<wbr>video/<wbr>{video_id}</div>
+                <p class="api-card__desc">每个视频都有独立的播放页，只有播放和清晰度切换，没有任何下载入口。</p>
+                <a class="btn btn--ghost btn--sm btn--block" href="watch.html?id=1">打开示例播放页</a>
+            </div>
+
+            <div class="api-card">
+                <div class="api-card__head">
+                    <span class="method method--get">GET</span>
+                    <span class="api-card__title">下载 360p</span>
+                </div>
+                <div class="api-card__path">/<wbr>video/<wbr>getvideo/<wbr>keyplus{id+1}/<wbr>{video_id}</div>
+                <p class="api-card__desc">返回 360p 主版本文件。直接访问这个路径就是下载——页面上没有下载按钮，只在接口里存在。</p>
+                <a class="btn btn--ghost btn--sm btn--block" id="dlHd" href="/video/getvideo/keyplus2/1">打开接口 · 下载 360p</a>
+            </div>
+
+            <div class="api-card">
+                <div class="api-card__head">
+                    <span class="method method--get">GET</span>
+                    <span class="api-card__title">下载 240p</span>
+                </div>
+                <div class="api-card__path">/<wbr>video/<wbr>getvideo/<wbr>back/<wbr>{video_vid}</div>
+                <p class="api-card__desc">按 vid 取回 240p 省流版，体积最小。同样是接口直出，不经过任何页面。</p>
+                <a class="btn btn--ghost btn--sm btn--block" id="dlLow" href="/video/getvideo/back/11092">打开接口 · 下载 240p</a>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<!-- ============ 页脚 ============ -->
+<footer class="footer">
+    <div class="wrap footer__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <div class="footer__links">
+            <a href="index.html">首页</a>
+            <a href="upload.html">上传视频</a>
+            <a href="docs.html">接口文档</a>
+            <a href="#videos">视频广场</a>
+        </div>
+        <div class="footer__copy">让每一刻都被看见 · yowat · 数据源：<span id="dsLabel">检测中…</span></div>
+    </div>
+</footer>
+
+<script src="assets/js/videos.data.js"></script>
+<script src="assets/js/yowat.js"></script>
+<script>
+Yowat.ready(function () {
+    "use strict";
+
+    var fmt = Yowat.fmt;
+    var state = { tag: "全部", q: "", sort: "new" };
+
+    /* ---------- 统计 ---------- */
+    var s = Yowat.stats();
+    animNum(document.getElementById("statVideos"), s.count);
+    document.getElementById("statDuration").textContent = fmt.duration(s.duration);
+    document.getElementById("statSize").textContent = fmt.size(s.size);
+    animNum(document.getElementById("statTags"), s.tags);
+
+    function animNum(node, target) {
+        var start = performance.now(), dur = 900;
+        (function tick(now) {
+            var t = Math.min((now - start) / dur, 1);
+            node.textContent = Math.round(target * (1 - Math.pow(1 - t, 3)));
+            if (t < 1) requestAnimationFrame(tick);
+        })(start);
+    }
+
+    /* ---------- 置顶视频 ---------- */
+    var featured = Yowat.all()[0];
+    var featuredBox = document.getElementById("featured");
+
+    if (featured) {
+        featuredBox.appendChild(Yowat.el(
+            '<article class="feature-card" tabindex="0" role="button" aria-label="播放置顶视频">' +
+                '<div class="feature-card__cover">' +
+                    (featured.cover
+                        ? '<img src="' + featured.cover + '" alt="' + featured.title + '" data-fallback="card__fallback">'
+                        : '<div class="card__fallback">🎬</div>') +
+                    '<span class="feature-card__badge">置顶</span>' +
+                    '<span class="feature-card__play">' + Yowat.PLAY_ICON + '</span>' +
+                '</div>' +
+                '<div class="feature-card__body">' +
+                    '<div class="feature-card__title">' + featured.title + '</div>' +
+                    '<div class="feature-card__meta">' +
+                        '<span>' + fmt.duration(featured.duration) + '</span><span>·</span>' +
+                        '<span>' + (featured.tags || []).join(" / ") + '</span>' +
+                    '</div>' +
+                '</div>' +
+            '</article>'
+        ));
+        var card = featuredBox.firstElementChild;
+        card.addEventListener("click", function () { Yowat.openPlayer(featured); });
+        card.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); Yowat.openPlayer(featured); }
+        });
+        document.getElementById("noticeText").textContent =
+            "最新上传：「" + featured.title + "」 · 视频链接格式 /video/" + featured.id +
+            " · 上传接口已开放，详见接口文档 · 更多玩法陆续上线";
+    } else {
+        featuredBox.appendChild(Yowat.el(
+            '<div class="feature-card"><div class="feature-card__cover"><div class="card__fallback">🎬</div></div></div>'
+        ));
+    }
+
+    /* ---------- 标签筛选 ---------- */
+    var chipBox = document.getElementById("chips");
+    ["全部"].concat(Yowat.tags()).forEach(function (t, i) {
+        var c = Yowat.el('<button class="chip' + (i === 0 ? " is-active" : "") + '" type="button">' + t + "</button>");
+        c.addEventListener("click", function () {
+            state.tag = t;
+            Array.prototype.forEach.call(chipBox.children, function (n) { n.classList.remove("is-active"); });
+            c.classList.add("is-active");
+            render();
+        });
+        chipBox.appendChild(c);
+    });
+
+    /* ---------- 搜索 & 排序 ---------- */
+    var qInput = document.getElementById("q");
+    var timer;
+    qInput.addEventListener("input", function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () { state.q = qInput.value; render(); }, 180);
+    });
+
+    document.getElementById("sort").addEventListener("change", function (e) {
+        state.sort = e.target.value;
+        render();
+    });
+
+    /* ---------- 渲染网格 ---------- */
+    var grid = document.getElementById("grid");
+    var count = document.getElementById("resultCount");
+
+    function render() {
+        var list = Yowat.filter(state);
+        grid.innerHTML = "";
+
+        if (!list.length) {
+            count.textContent = "没有匹配的视频";
+            grid.appendChild(Yowat.el(
+                '<div class="empty">' +
+                    '<div class="empty__icon">🔍</div>' +
+                    '<h3>没有找到相关视频</h3>' +
+                    '<p>换个关键词试试，或者自己上传一个</p>' +
+                    '<a class="btn btn--primary btn--sm" href="upload.html">上传视频</a>' +
+                '</div>'
+            ));
+            return;
+        }
+
+        count.textContent = "共 " + list.length + " 个视频" +
+            (state.tag !== "全部" ? " · " + state.tag : "") +
+            (state.q ? " · 关键词「" + state.q + "」" : "");
+
+        list.forEach(function (v, i) { grid.appendChild(Yowat.renderCard(v, i)); });
+    }
+
+    /* ---------- 接口速览里的下载链接（指向接口，不是页面） ---------- */
+    var first = Yowat.all()[0];
+    if (first) {
+        var hd = document.getElementById("dlHd");
+        var low = document.getElementById("dlLow");
+        if (hd) hd.href = Yowat.apiPath(first, "360");
+        if (low) low.href = Yowat.apiPath(first, "240");
+    }
+
+    /* ---------- 数据来源标识 ---------- */
+    var ds = document.getElementById("dsLabel");
+    if (ds) ds.textContent = Yowat.dataSource() === "d1" ? "Cloudflare D1" : "本地清单（未连库）";
+
+    render();
+});
+</script>
+
+</body>
+</html>

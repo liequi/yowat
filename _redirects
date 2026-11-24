@@ -1,0 +1,17 @@
+# yowat · 静态路由补充
+# ---------------------------------------------------------------
+# 这里刻意“什么都不配”，原因是一个踩过的坑：
+#
+# Pages 默认 html_handling = "auto-trailing-slash"，它认为 /docs 才是规范地址，
+# 访问 /docs.html 会被 308 重定向到 /docs。
+# 所以千万别写这种规则：
+#     /docs    /docs.html    200      ← 内部改写到 /docs.html
+#     /upload  /upload.html  200      ← 又被 308 掰回 /docs、/upload
+# 两条逻辑互相踢皮球，浏览器就报“重定向次数过多”。
+#
+# 现状：Pages 本来就支持省略扩展名，/docs、/upload、/watch 都能直接命中对应 html，
+# 不需要任何规则。接口类路径（/api/*、/video/*）全部由 functions/ 里的
+# Pages Functions 处理，也不走这里。
+#
+# 以后再要加跳转，只加“真跳转”（301/302 到不同路径），
+# 不要用 200 重写到 xxx.html。

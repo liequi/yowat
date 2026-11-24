@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>播放 · yowat</title>
+<meta name="description" content="yowat 视频播放页">
+<meta name="theme-color" content="#0d0b23">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+
+<div class="bg"></div>
+
+<header class="nav">
+    <div class="wrap nav__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <nav class="nav__links">
+            <a class="nav__link" href="index.html">首页</a>
+            <a class="nav__link is-active" href="index.html#videos">视频广场</a>
+            <a class="nav__link" href="upload.html">上传</a>
+            <a class="nav__link" href="docs.html">接口文档</a>
+            <a class="btn btn--primary btn--sm nav__cta" href="upload.html">＋ 上传视频</a>
+        </nav>
+    </div>
+</header>
+
+<main class="wrap page" id="app">
+    <div class="crumb">
+        <a href="index.html">首页</a><span class="sep">/</span>
+        <a href="index.html#videos">视频广场</a><span class="sep">/</span>
+        <span id="crumbTitle">播放</span>
+    </div>
+
+    <div class="watch-layout">
+        <div>
+            <div class="stage">
+                <div class="player">
+                    <video id="player" controls playsinline preload="metadata"></video>
+                </div>
+            </div>
+
+            <div class="quality" id="quality" hidden>
+                <span class="quality__label">清晰度</span>
+                <button class="quality__btn" type="button" data-q="360">360p</button>
+                <button class="quality__btn" type="button" data-q="240">240p 省流</button>
+            </div>
+
+            <div class="watch-head">
+                <h1 id="title">加载中…</h1>
+                <div class="watch-meta" id="meta"></div>
+                <div class="tag-row" id="tags"></div>
+            </div>
+
+            <div class="modal__actions" style="border-top:0;padding-top:0;margin-top:16px" id="actions"></div>
+
+            <div class="panel">
+                <div class="panel__title">简介</div>
+                <p id="desc"></p>
+            </div>
+        </div>
+
+        <aside>
+            <div class="panel" style="margin-top:0">
+                <div class="panel__title">更多视频</div>
+                <div class="related" id="related"></div>
+            </div>
+
+            <div class="panel">
+                <div class="panel__title">分享这个视频</div>
+                <div class="search" style="margin-bottom:12px">
+                    <input id="shareUrl" readonly aria-label="视频链接">
+                </div>
+                <button class="btn btn--ghost btn--sm btn--block" id="copyBtn">复制链接</button>
+            </div>
+        </aside>
+    </div>
+</main>
+
+<footer class="footer">
+    <div class="wrap footer__inner">
+        <a class="logo" href="index.html">
+            <span class="logo__mark">▶</span>
+            <span class="logo__text">yowat</span>
+        </a>
+        <div class="footer__links">
+            <a href="index.html">首页</a>
+            <a href="upload.html">上传视频</a>
+            <a href="docs.html">接口文档</a>
+        </div>
+        <div class="footer__copy">让每一刻都被看见 · yowat</div>
+    </div>
+</footer>
+
+<script src="assets/js/videos.data.js"></script>
+<script src="assets/js/yowat.js"></script>
+<script>
+Yowat.ready(function () {
+    "use strict";
+
+    var params = new URLSearchParams(location.search);
+    var id = params.get("id");
+    var v = Yowat.get(id) || Yowat.all()[0];
+    var fmt = Yowat.fmt;
+
+    if (!v) {
+        document.getElementById("app").innerHTML =
+            '<div class="empty" style="margin-top:40px">' +
+                '<div class="empty__icon">📭</div>' +
+                '<h3>这里还没有视频</h3>' +
+                '<p>上传第一个视频，它会立刻出现在这里</p>' +
+                '<a class="btn btn--primary btn--sm" href="upload.html">去上传</a>' +
+            '</div>';
+        return;
+    }
+
+    document.title = v.title + " · yowat";
+    document.getElementById("crumbTitle").textContent = v.title;
+
+    /* ---------- 播放器：默认 360p ---------- */
+    var player = document.getElementById("player");
+    var qualityBox = document.getElementById("quality");
+    var QKEY = "yowat.quality";
+    var quality = "360";
+
+    if (v.cover) player.poster = v.cover;
+
+    function syncQuality() {
+        Array.prototype.forEach.call(qualityBox.querySelectorAll("[data-q]"), function (b) {
+            b.classList.toggle("is-on", b.getAttribute("data-q") === quality);
+        });
+    }
+
+    function applyQuality(q, keepTime) {
+        var t = keepTime ? player.currentTime : 0;
+        var wasPlaying = keepTime && !player.paused;
+
+        quality = q;
+        if (t > 0) {
+            var once = function () {
+                player.removeEventListener("loadedmetadata", once);
+                try { player.currentTime = t; } catch (e) { }
+                if (wasPlaying) {
+                    var p = player.play();
+                    if (p && p.catch) p.catch(function () { });
+                }
+            };
+            player.addEventListener("loadedmetadata", once);
+        }
+
+        player.src = Yowat.srcOf(v, q);
+        syncQuality();
+        try { localStorage.setItem(QKEY, q); } catch (e) { }
+    }
+
+    var remembered = "360";
+    try { remembered = localStorage.getItem(QKEY) === "240" ? "240" : "360"; } catch (e) { }
+    qualityBox.hidden = false;
+    qualityBox.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-q]");
+        if (!b) return;
+        var q = b.getAttribute("data-q");
+        if (q !== quality) applyQuality(q, true);
+    });
+    applyQuality(remembered, false);
+
+    player.addEventListener("error", function () {
+        if (quality === "360") {
+            applyQuality("240", true);
+            Yowat.toast("360p 没加载出来，已切到 240p");
+        } else {
+            Yowat.toast("视频文件没能加载，检查一下 " + Yowat.srcOf(v, "360") + " 是否存在");
+        }
+    });
+
+    /* ---------- 标题 / 元信息 ---------- */
+    document.getElementById("title").textContent = v.title;
+
+    document.getElementById("meta").innerHTML =
+        "<span>" + fmt.duration(v.duration) + "</span><span class='sep'>·</span>" +
+        "<span>" + (v.views ? fmt.count(v.views) + " 次播放" : "新上传") + "</span><span class='sep'>·</span>" +
+        "<span>" + fmt.date(v.createdAt) + "</span><span class='sep'>·</span>" +
+        "<span>video_id " + v.id + "</span>";
+
+    document.getElementById("tags").innerHTML = (v.tags || []).map(function (t) {
+        return '<span class="card__tag">' + t + "</span>";
+    }).join("");
+
+    document.getElementById("desc").textContent = v.description || "这位创作者还没有填写简介。";
+
+    /* ---------- 操作按钮（只做播放相关，不出现任何下载入口） ---------- */
+    var actions = document.getElementById("actions");
+    actions.appendChild(btn("🔗 复制播放链接", "btn btn--primary btn--sm", function () { Yowat.copy(Yowat.pageUrl(v)); }));
+    actions.appendChild(Yowat.el('<a class="btn btn--ghost btn--sm" href="index.html#videos">返回广场</a>'));
+
+    function btn(label, cls, onClick) {
+        var b = Yowat.el('<button class="' + cls + '" type="button">' + label + "</button>");
+        b.addEventListener("click", onClick);
+        return b;
+    }
+
+    /* ---------- 分享区 ---------- */
+    var shareInput = document.getElementById("shareUrl");
+    shareInput.value = Yowat.pageUrl(v);
+    document.getElementById("copyBtn").addEventListener("click", function () {
+        Yowat.copy(shareInput.value);
+    });
+
+    /* ---------- 相关推荐 ---------- */
+    var related = Yowat.all().filter(function (x) { return x.id !== v.id; });
+    var relatedBox = document.getElementById("related");
+
+    if (!related.length) {
+        var last = Yowat.all()[0];
+        relatedBox.appendChild(Yowat.el(
+            '<div style="font-size:.86rem;color:var(--muted);line-height:1.8">' +
+                "目前只有这一个视频。上传更多内容后，这里会自动出现推荐。" +
+            "</div>"
+        ));
+        relatedBox.appendChild(Yowat.el(
+            '<a class="btn btn--ghost btn--sm btn--block" href="upload.html" style="margin-top:12px">上传新视频</a>'
+        ));
+    } else {
+        related.slice(0, 6).forEach(function (x) { relatedBox.appendChild(Yowat.renderMini(x)); });
+    }
+});
+</script>
+
+</body>
+</html>

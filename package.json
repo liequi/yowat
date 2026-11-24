@@ -1,0 +1,21 @@
+{
+  "name": "yowat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "yowat · 视频分享平台（Cloudflare Pages + D1 + Functions）",
+  "scripts": {
+    "test": "node tests/functions.test.mjs && node tests/auth.test.mjs && node tests/compress.test.mjs && node tests/add.test.mjs",
+    "add": "node tools/add.mjs",
+    "pack": "node tools/compress.mjs",
+    "pack:all": "node tools/compress.mjs --all",
+    "publish": "node tools/compress.mjs && wrangler pages deploy --project-name yowat --branch main --commit-dirty=true",
+    "compress": "node tools/compress.mjs",
+    "dev": "wrangler pages dev . --d1 DB=450ce2d1-8507-47b4-93d6-7428c26963ac",
+    "deploy": "wrangler pages deploy --project-name yowat --branch main --commit-dirty=true",
+    "db": "wrangler d1 execute yowat-db --remote"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
