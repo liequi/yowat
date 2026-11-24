@@ -273,8 +273,35 @@
     </div>
 </footer>
 
+<script src="assets/js/yowat.js"></script>
 <script src="assets/js/vendor/ffmpeg.min.js"></script>
 <script src="assets/js/compress.js"></script>
+<script>
+/* 兜底：yowat.js 加载失败时也别让下面整段脚本挂掉
+   （以前少了这个文件，`Yowat.ready` 直接 ReferenceError，上传框永远 hidden） */
+if (!window.Yowat) {
+    window.Yowat = {
+        ready: function (cb) {
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", cb);
+            } else {
+                cb();
+            }
+        },
+        copy: function (text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand("copy"); } catch (e) { }
+            document.body.removeChild(ta);
+        }
+    };
+}
+</script>
 <script>
 Yowat.ready(function () {
     "use strict";
