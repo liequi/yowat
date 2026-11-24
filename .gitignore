@@ -20,3 +20,7 @@ Thumbs.db
 # 临时口令文件（用完删）
 .pat
 .pat.txt
+
+# 浏览器调试缓存（做完自动化测试留下的）
+.edge-prof/
+_dom.html
