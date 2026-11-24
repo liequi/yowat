@@ -4,11 +4,11 @@
  * DELETE /api/videos/{id}   作者删自己的视频（文件从仓库删掉，记录软删）
  */
 
-import { json, findVideo, normalize } from "../../_lib.js";
+import { json, findVideo, normalize, promoteIfLive } from "../../_lib.js";
 import { currentUser } from "../../_auth.js";
 import { deleteFiles, configured } from "../../_github.js";
 
-export async function onRequestGet({ env, params }) {
+export async function onRequestGet({ env, params, request }) {
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ code: 1001, message: "参数错误", data: null }, 400);
 
@@ -18,6 +18,8 @@ export async function onRequestGet({ env, params }) {
             const dbError = error.startsWith("D1");
             return json({ code: dbError ? 5000 : 1004, message: error, data: null }, dbError ? 500 : 404);
         }
+        /* 刚上传的视频要等构建，这里探一次文件是否已经在线 */
+        await promoteIfLive(env, request, video);
         return json({ code: 0, message: "success", data: video });
     } catch (err) {
         return json({ code: 5000, message: "查询失败：" + err.message, data: null }, 500);

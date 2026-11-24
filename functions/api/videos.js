@@ -9,7 +9,7 @@
  * 宁可把软删的记录也列出来，也别让首页白屏。
  */
 
-import { json, normalize } from "../_lib.js";
+import { json, normalize, promoteIfLive } from "../_lib.js";
 
 export async function onRequestGet({ env, request }) {
     if (!env.DB) {
@@ -61,6 +61,12 @@ export async function onRequestGet({ env, request }) {
             if (!/no such column|no such table/i.test(err.message || "")) throw err;
             /* 迁移 001 还没跑：退回不带 status 的老查询 */
             rows = await run(filters);
+        }
+
+        /* 列表里有「等构建」的记录时，顺手探一下真实文件是否已上线（最多 5 条） */
+        const pending = rows.filter((r) => r && r.status === "processing").slice(0, 5);
+        if (pending.length) {
+            await Promise.all(pending.map((r) => promoteIfLive(env, request, r)));
         }
 
         return json({ code: 0, message: "success", data: rows.map(normalize) });
