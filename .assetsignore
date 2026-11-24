@@ -4,8 +4,13 @@
 functions
 node_modules
 .wrangler
+
+# 仓库相关的东西，一律不上 CDN
 .git
 .gitignore
+.gitattributes
+.github
+README.md
 
 # 只在仓库里有意义，不需要对外可访问
 DEPLOY.md

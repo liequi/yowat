@@ -1,0 +1,48 @@
+# 自动部署：push 到 main 就把整个站点传到 Cloudflare Pages
+#
+# 为什么要走 GitHub Actions 而不是 Pages 的 Git 集成：
+# yowat 这个 Pages 项目最初是用 `wrangler pages deploy` 直传建的，
+# Cloudflare 不允许 Direct Upload 项目之后再接 Git。
+# 想保住 yowat.pages.dev 这个地址，就只能由 Actions 跑 wrangler 直传。
+#
+# 需要的两个仓库 Secrets（Settings → Secrets and variables → Actions）：
+#   CLOUDFLARE_API_TOKEN   权限：Account → Cloudflare Pages → Edit
+#   CLOUDFLARE_ACCOUNT_ID  在 Cloudflare 后台右侧栏能复制到
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # 允许在 Actions 页面手动点一下重跑，不用改文件
+  workflow_dispatch:
+
+# 连续 push 时只跑最新的那次，避免两个部署互相覆盖
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 部署到 Cloudflare Pages
+        # --branch main 决定这次上传算生产部署（对应项目的 production_branch）
+        run: npx --yes wrangler@4 pages deploy . --project-name yowat --branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CI: true
+
+      - name: 结果
+        run: echo "已上线 → https://yowat.pages.dev"

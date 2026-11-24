@@ -375,49 +375,61 @@ Pages 有 CDN 缓存，HTML 一般即时生效；`assets/*` 带同名文件可�
 > 不接 GitHub 的话，上传页对别人来说没有意义 —— 因为 Pages 直传
 > 必须由你本机发一条命令，别人点了按钮什么也不会发生。
 
-### 为什么非要 GitHub
+### 为什么是 GitHub Actions，而不是 Pages 的 Git 集成
 
-视频有两种放法：
+`yowat` 这个 Pages 项目是在 Cloudflare 后台以外、用 `wrangler pages deploy` 直传建的
+（API 里 `source: null`，Dashboard 显示的 Git Provider 是 `No`）。
+**Cloudflare 不允许 Direct Upload 项目之后改接 Git 仓库**，只能新建一个项目 ——
+而新建项目就意味着地址会变成 `yowat-xxxx.pages.dev`，`yowat.pages.dev` 无法迁移
+（`*.pages.dev` 子域名既不能改名也不能转移）。
 
-| 放法 | 谁能让新视频上线 | 代价 |
-| --- | --- | --- |
-| Pages 直传（现状） | 只有在 `G:\yowat` 这台机器上跑 `npm run deploy` 的人 | 免费 |
-| 仓库 + Git 集成 | 任何人，传完等 1~2 分钟自动上线 | 仓库会变大 |
+所以走的是：**仓库 push → GitHub Actions 跑 `wrangler pages deploy` → 还是传到原来那个项目**。
+地址、域名、D1 绑定、现有两条视频全都不动。
 
-要让别人能传，文件必须进一个能被自动构建的地方。选了 GitHub 这条路，
-那就要接受它的三条硬限制：
+代价是三条硬限制，都绕不过去：
 
-- **单文件 25MiB**（所以必须压缩，压缩这一步不能省）
-- **每月 500 次构建**（每次上传算一次，一天 16 个以内没问题）
+- **单文件 25MiB**（Pages 的上限，所以压缩这一步不能省）
 - **仓库只增不减**（视频进了 git 历史就永远在，删了也占地方。100 个视频约 300MB）
+- **每次上传要等一次完整部署**（约 1~3 分钟，因为 24MB 的转码引擎每次都要重传）
+  GitHub Actions 免费额度：public 仓库不限，private 每月 2000 分钟，够跑几百次。
 
-### 12.1 跑数据库迁移（只跑一次）
+已经做完的部分（本轮已执行，不用你动手）：
 
-新增了 `users` / `sessions` 两张表，`videos` 加了 `owner_id` / `status` / `uploader` 三列。
+- 数据库迁移已在生产 D1 上跑完
+- `G:\yowat` 已 `git init` 并提交了第一个 commit
+- `.github/workflows/deploy.yml` 已写好
+
+
+### 12.1 数据库迁移（已完成，不用再跑）
+
+`users` / `sessions` 两张表和 `videos` 的 `owner_id` / `status` / `uploader` 三列
+已经在你的生产 D1 上建好了，两条老视频记录完好。
+
+想复查的话：
 
 ```bash
-npx wrangler d1 execute yowat-db --remote --file=./migrations/001-users.sql
+npx wrangler d1 execute yowat-db --remote --command "SELECT id,title,status,owner_id FROM videos"
 ```
 
-这个文件**不删任何东西**，老视频记录都在。重复执行会因为列已存在而报错，这是预期的。
+重复执行迁移文件会因列已存在而报错，这是正常的，别慌。
 
 ### 12.2 把项目推到 GitHub
 
-`G:\yowat` 现在还不是 git 仓库，先初始化：
+本地仓库已经建好了（`git init` + 首个 commit 都做完了），只差一个远端地址。
+
+在 GitHub 上建一个**空仓库**（不要勾 README / .gitignore / license，否则会和本地冲突），
+然后：
 
 ```bash
 cd /g/yowat
-git init -b main
-git add .
-git commit -m "yowat: 开放上传版本"
-```
-
-在 GitHub 上建一个空仓库（private 也行），然后：
-
-```bash
 git remote add origin https://github.com/<你的用户名>/<仓库名>.git
 git push -u origin main
 ```
+
+第一次 push 会弹出一个浏览器窗口让你登录 GitHub，登录授权一次，以后就不再问了。
+
+推完之后仓库应该看到 44 个文件，其中 `assets/js/vendor/ffmpeg-core.wasm` 是 24MB，
+这是转码引擎，**必须跟着仓库走**，不然上传页在别人电脑上跑不起来。
 
 ### 12.3 生成一个 token
 
@@ -429,24 +441,10 @@ GitHub → Settings → Developer settings → **Fine-grained tokens** → Gener
 
 拿到形如 `github_pat_xxx` 的字符串，**只显示一次**，复制好。
 
-### 12.4 把 Pages 接到仓库
+### 12.4 在 Cloudflare 加两个变量（Worker 提交文件用）
 
-Cloudflare Dashboard → Workers & Pages → `yowat` → Settings → Builds & deployments →  
-**Connect Git**，选刚推上去的仓库：
-
-- Build command：**留空**
-- Build output directory：`/`
-- 根目录：留空
-
-连上之后，**每次 push 会自动构建**。手动 `npm run deploy` 以后就不用了
-（还能用，但会被下一次自动构建覆盖）。
-
-> D1 绑定不读 `wrangler.toml`，要在 Settings → Bindings 里确认
-> 变量名 `DB` 的 D1 还在，否则接口会报 5001。
-
-### 12.5 加两个环境变量
-
-同一个 Settings 页面 → **Variables and Secrets**：
+Dashboard → Workers & Pages → `yowat` → Settings → **Variables and Secrets** →
+Environment 选 **Production**（Preview 也加一份更好）：
 
 | 名称 | 值 | 类型 |
 | --- | --- | --- |
@@ -454,18 +452,59 @@ Cloudflare Dashboard → Workers & Pages → `yowat` → Settings → Builds & d
 | `GITHUB_REPO` | `用户名/仓库名`，例如 `ruolin/yowat` | 明文 |
 | `GITHUB_BRANCH` | 可选，默认 `main` | 明文 |
 
-改完要**重新部署一次**才生效（Pages 会提示 Redeploy）。
+顺手确认同一页面的 **Bindings** 里 D1 变量名是 `DB`，
+否则接口会全部报 5001。
 
-### 12.6 验证
+改完点 **Deploy** / **Redeploy** 一次让变量生效。
+
+### 12.5 在 GitHub 加两个 Secret（Actions 部署用）
+
+打开你的仓库 → **Settings** → 左侧 **Secrets and variables** → **Actions** →
+**New repository secret**，加两条：
+
+**第一条 `CLOUDFLARE_API_TOKEN`**
+
+Cloudflare Dashboard → 右上头像 → **My Profile** → 左侧 **API Tokens** →
+**Create Token** → 最下面 **Create Custom Token**：
+
+- Token name：`yowat-github-actions`
+- Permissions：`Account` → `Cloudflare Pages` → **Edit**
+- Account Resources：`Include` → 你的账号
+- 其它留空（不要给 Zone、不要给 Workers Scripts）
+- TTL 按习惯设，到期要重新生成并更新到 GitHub
+
+创建后那串 token **只显示一次**，复制下来。
+
+**第二条 `CLOUDFLARE_ACCOUNT_ID`**
+
+值直接抄这个（已经是你账号的 ID）：
+
+```
+15887767d0fd3add2aa1a526b1661925
+```
+
+> 为什么是两个平台各配一份：Cloudflare 那份让**网站后端**能往仓库写文件，
+> GitHub 那份让 **Actions** 能把代码推上 Cloudflare。两边各管一头，互不需要对方的完整权限。
+
+### 12.6 验证（分两步，别跳过第一步）
+
+**第一步：先确认部署通道是通的**
+
+仓库 → **Actions** → 左侧 `Deploy` → 右侧 **Run workflow** → 绿色按钮。
+等 1~3 分钟，出现绿色对勾就是成功，这时 `https://yowat.pages.dev` 应该和现在一模一样。
+
+这一步不通就别往下走，先看失败日志里缺了哪个 Secret。
+
+**第二步：再验证上传**
 
 1. 打开 `https://yowat.pages.dev/upload`
 2. 注册一个账号（用户名 4~20 位字母数字下划线，密码 8 位以上）
 3. 选一个短视频（建议先用 30 秒以内的测试）
 4. 页面会显示「压到 360p → 压到 240p → 上传 → 等待上线」
-5. 看到「上传成功 #3」后，去 GitHub 仓库看有没有新 commit
-6. 等 1~2 分钟，Pages 构建完，打开 `/video/3` 就能播
+5. 看到「上传成功 #3」后，去 GitHub 仓库 commits 看有没有新的提交
+6. Actions 会自动跑起来，等它变绿，打开 `/video/3` 就能播
 
-失败时去看 Pages 的 Functions 日志，错误码对应：
+失败时去看 Cloudflare 的 Functions 日志，错误码对应：
 
 | 码 | 意思 |
 | --- | --- |
@@ -473,6 +512,20 @@ Cloudflare Dashboard → Workers & Pages → `yowat` → Settings → Builds & d
 | 5003 | GitHub 拒绝了提交（token 权限不对，或分支名写错） |
 | 4010 | 没登录 |
 | 4020 / 4021 | 配额用完了（默认每人 20 个 / 200MB） |
+
+### 12.6.1 别人上传后，你本地要记得先 pull
+
+网页上传是**服务端直接往 GitHub 写的提交**，你本机的 `G:\yowat` 不会自动同步。
+如果不 pull 就在本地改东西再 push，会被 GitHub 顶回来（`non-fast-forward`）。
+
+所以每次在本机动手之前，先拉一下：
+
+```bash
+cd /g/yowat
+git pull
+```
+
+有冲突就 `git pull --rebase`。日常只往网页传视频、不动代码的话，不 pull 也没影响。
 
 ### 12.7 关于压缩速度
 
@@ -504,11 +557,22 @@ Cloudflare Dashboard → Workers & Pages → `yowat` → Settings → Builds & d
 不想走网页上传，或者视频在本机、懒得等浏览器压，还是走命令行：
 
 ```bash
-npm run add -- --file "D:\某个视频.mp4" --id 3
+npm run add -- --file "D:\某个视频.mp4" --id 3 --register
 ```
 
-这条命令会压 360p + 240p、抽封面、删原片、写数据库。**但它只改本地**，
-改完要 `npm run deploy`（或 `git push`）才上线。
+这条命令会压 360p + 240p、抽封面、删原片、写线上数据库。
+
+**但文件还得进仓库才算真正上线**，接着补一条：
+
+```bash
+git add videos/3 && git commit -m "add video 3" && git push
+```
+
+push 之后 Actions 自动部署，1~3 分钟生效。
+
+> ⚠️ 以后尽量只用 `git push` 上线。`npm run deploy` 是直传，它会把**本地目录**
+> 推上去；如果本地有仓库里还没有的东西，下次 Actions 一跑就会把它覆盖掉，
+> 后台和仓库就对不上了。直传只在紧急修 bug、且改完会立刻 push 的时候用。
 
 ---
 
@@ -532,9 +596,10 @@ npm run add -- --file "D:\某个视频.mp4" --id 3
 | `functions/_auth.js`                                      | 密码哈希、会话、Cookie、限流                     |
 | `functions/_github.js`                                    | Git Data API：多文件一次 commit / 删文件      |
 | `schema.sql`                                              | D1 建表与初始数据                           |
-| `migrations/001-users.sql`                                | 用户、会话、视频归属（**必须跑一次**）                |
+| `migrations/001-users.sql`                                | 用户、会话、视频归属（**已在生产跑过**）               |
 | `wrangler.toml`                                           | Pages + D1 配置（记得填 database_id）       |
 | `_redirects` / `_headers`                                 | 短链；上传页的跨域隔离头                         |
+| `.github/workflows/deploy.yml`                            | **push 后自动部署**（保住 yowat.pages.dev 的关键） |
 | `tests/functions.test.mjs`                                | 接口单测                                 |
 | `tests/auth.test.mjs`                                     | 账号 + 上传链路测试（跑真 SQLite）               |
 | `.assetsignore`                                           | 不随站点上传的文件（文档、SQL、测试等）                |
