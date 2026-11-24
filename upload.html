@@ -521,13 +521,28 @@ Yowat.ready(function () {
         el.preview.addEventListener("loadedmetadata", function handler() {
             el.preview.removeEventListener("loadedmetadata", handler);
             state.duration = Math.round(el.preview.duration) || 0;
+            var w = el.preview.videoWidth || 0, h = el.preview.videoHeight || 0;
             el.pickedMeta.textContent = fmtBytes(file.size) + " · " + fmtDur(state.duration) +
-                " · " + (el.preview.videoWidth || 0) + "×" + (el.preview.videoHeight || 0);
+                " · " + w + "×" + h;
+            state.size = { width: w, height: h };
 
-            if (YowatCompress) {
+            if (!YowatCompress) return;
+
+            /* 用引擎里的同一套规则预检，超限当场说清楚，别等人点了上传再干等 */
+            try {
+                YowatCompress.precheck(file, { width: w, height: h, duration: state.duration });
                 var est = YowatCompress.estimate(state.duration, YowatCompress.isolated());
-                if (est) msg(el.fileErr, "预计压缩耗时 " + est + "，期间请别关页面", "warn");
+                msg(el.fileErr, "浏览器本地转码，上限 " +
+                    YowatCompress.fmtDur(YowatCompress.MAX_DURATION) + " / " +
+                    fmtBytes(YowatCompress.MAX_SOURCE) +
+                    (est ? "，这个视频" + est : "") + "。期间别关页面", "warn");
+            } catch (e) {
+                msg(el.fileErr, e.message, "err");
             }
+        });
+
+        el.preview.addEventListener("error", function () {
+            msg(el.fileErr, "浏览器读不出这个文件的画面，多半是 H.265/HEVC 编码（iPhone 默认就是）。先用剪辑软件导出成 H.264 的 MP4 再传", "err");
         });
 
         if (!el.fTitle.value) {
@@ -577,23 +592,45 @@ Yowat.ready(function () {
         if (cur) cur.className = "job__step is-on";
     }
 
+    /* 进度条旁边加一个"已等 Xs"的心跳：百分比在长视频上可能十几秒才动一格，
+       没有这个数字，人会以为页面死了 */
+    var stageTick = null;
+    var stageT0 = 0;
+    var stageRatio = -1;
+    var stageTextCache = "";
+
+    function paintNote() {
+        if (stageRatio < 0) return;     // 不定进度的阶段（下载引擎）由 onNote 自己写
+        var pct = Math.round(stageRatio * 100);
+        var sec = Math.round((Date.now() - stageT0) / 1000);
+        el.stageNote.textContent = pct + "%" + (sec >= 5 ? " · 已 " + sec + "s" : "");
+    }
+
     function setStage(text, ratio) {
         el.jobPanel.hidden = false;
-        el.stageText.textContent = text;
 
-        if (ratio < 0 || typeof ratio !== "number") {
+        if (text !== stageTextCache) {
+            stageTextCache = text;
+            el.stageText.textContent = text;
+            stageT0 = Date.now();
+        }
+        stageRatio = (typeof ratio === "number" && ratio >= 0) ? ratio : -1;
+
+        if (stageRatio < 0) {
             el.progress.classList.add("is-idle");
             el.progressBar.style.width = "30%";
-            el.stageNote.textContent = "";
         } else {
             el.progress.classList.remove("is-idle");
-            var pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-            el.progressBar.style.width = pct + "%";
-            el.stageNote.textContent = pct + "%";
+            el.progressBar.style.width = Math.max(0, Math.min(100, Math.round(stageRatio * 100))) + "%";
         }
+        paintNote();
+
+        if (!stageTick) stageTick = setInterval(paintNote, 1000);
     }
 
     function finishStage(text) {
+        if (stageTick) { clearInterval(stageTick); stageTick = null; }
+        stageRatio = 1;
         el.progress.classList.remove("is-idle");
         el.progressBar.style.width = "100%";
         el.stageText.textContent = text;

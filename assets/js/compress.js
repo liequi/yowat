@@ -47,8 +47,22 @@
         { height: 240, crf: 32, audioKbps: 48 }
     ];
 
-    /** 源文件上限。wasm 要把整个文件读进内存，太大浏览器直接崩 */
-    var MAX_SOURCE = 220 * 1024 * 1024;
+    /* 源文件上限。why 120MB：wasm 要把整个文件读进内存写进虚拟文件系统，
+       编码时还要另外分配帧缓冲，实测超过这个量级 Chrome 的 WebAssembly 堆
+       会 OOM —— 而且不报错，worker 静默消失，进度条永远停在 0%。
+       宁可提前拒绝，也别让人对着 0% 干等。 */
+    var MAX_SOURCE = 120 * 1024 * 1024;
+
+    /* 时长上限。单线程 wasm 转 1080p 大约 0.5~1 倍实时，两个档位再加封面，
+       5 分钟的视频要等十几分钟，不如让人先剪短。 */
+    var MAX_DURATION = 300;
+
+    /* 像素秒上限（宽 × 高 × 秒）。挡住"4K 两分钟"这种看着短、实际工作量爆炸的文件 */
+    var MAX_PIXEL_SECONDS = 6.5e8;
+
+    /* 单档转码多久没有任何进度就判定卡死。x264 起编码器最久几百毫秒，
+       真在编码的话 -progress 每 0.5 秒就会推一次，一分钟不动肯定是死了 */
+    var STALL_MS = 60000;
 
     var instance = null;
     var loadingPromise = null;
@@ -163,7 +177,7 @@
 
             v.addEventListener("error", function () {
                 URL.revokeObjectURL(url);
-                reject(new Error("这个文件浏览器读不了，可能不是标准的 MP4/WebM"));
+                reject(new Error("浏览器读不出这个文件的画面。多半是 H.265/HEVC 或 AV1 编码（iPhone 默认就是 H.265），先用剪辑软件导出成 H.264 的 MP4 再传"));
             });
 
             v.src = url;
@@ -176,6 +190,42 @@
         var i = 0;
         while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
         return (i === 0 ? Math.round(v) : v.toFixed(1)) + " " + units[i];
+    }
+
+    function fmtDur(sec) {
+        var s = Math.round(Number(sec) || 0);
+        if (s < 60) return s + " 秒";
+        var m = Math.floor(s / 60), r = s % 60;
+        return r ? m + " 分 " + r + " 秒" : m + " 分钟";
+    }
+
+    /**
+     * 开转之前先量一遍。why：单线程 wasm 的算力和内存都是有硬顶的，
+     * 超了要么等半小时，要么浏览器 OOM 静默挂掉（进度条永远 0%）。
+     * 与其让人干等，不如当场把原因和"要剪到多短"说清楚。
+     */
+    function precheck(file, meta) {
+        var size = file.size || 0;
+        var w = meta.width || 0, h = meta.height || 0, d = meta.duration || 0;
+
+        if (size > MAX_SOURCE) {
+            throw new Error("文件 " + fmtBytes(size) + " 超过了本地转码上限 " +
+                fmtBytes(MAX_SOURCE) + "。先剪短，或用剪辑软件导出一个更小的版本");
+        }
+        if (!d) {
+            throw new Error("读不出这个视频的时长，文件可能损坏了，换个文件试试");
+        }
+        if (d > MAX_DURATION) {
+            throw new Error("视频 " + fmtDur(d) + "，超过了 " + fmtDur(MAX_DURATION) +
+                " 的上限。转码是在你自己浏览器里单线程跑的，太长的视频能等十几分钟 —— 先剪到 " +
+                fmtDur(MAX_DURATION) + " 以内再传");
+        }
+        if (w > 0 && h > 0 && w * h * d > MAX_PIXEL_SECONDS) {
+            var allowed = Math.floor(MAX_PIXEL_SECONDS / (w * h));
+            throw new Error("视频是 " + w + "×" + h + "、" + fmtDur(d) +
+                "，这个分辨率下最多能转 " + fmtDur(allowed) +
+                "。先用剪辑软件导出一个 1080p 以内的版本，或者剪短一点");
+        }
     }
 
     /** 粗略估个耗时：wasm 单线程大约是实时的 1.2~2.5 倍，只能估个数量级 */
@@ -193,21 +243,47 @@
        ========================================================= */
 
     function runTo(ff, outputName, args, onRatio) {
+        var lastBeat = Date.now();
+        var dead = false;           // 看门狗是否已经判死
+
         ff.setProgress(function (e) {
+            lastBeat = Date.now();  // 有进度就是还活着
             if (onRatio && e && typeof e.ratio === "number" && isFinite(e.ratio)) {
                 onRatio(Math.max(0, Math.min(1, e.ratio)));
             }
         });
 
-        return ff.run.apply(ff, args).then(function () {
-            var data = ff.FS("readFile", outputName);
-            var type = /\.jpe?g$/i.test(outputName) ? "image/jpeg" : "video/mp4";
-            /* readFile 返回的 Uint8Array 是 wasm 堆的视图，必须拷出来，
-               否则下一次 run 会把它覆盖掉 */
-            var copy = new Uint8Array(data.length);
-            copy.set(data);
-            try { ff.FS("unlink", outputName); } catch (e) { /* 没有就算了 */ }
-            return new Blob([copy], { type: type });
+        return new Promise(function (resolve, reject) {
+            /* 看门狗：wasm OOM 时 worker 会直接消失，ff.run 的 promise 永远不落定，
+               页面就永远停在 0%。这里靠"进度心跳"兜住，宁可报错也别无声卡死。 */
+            var timer = setInterval(function () {
+                if (Date.now() - lastBeat <= STALL_MS) return;
+                dead = true;
+                clearInterval(timer);
+                try { ff.exit(1); } catch (e) { /* 已经崩了就算了 */ }
+                instance = null;    // 引擎状态不可信，下次重新加载
+                loadingPromise = null;
+                reject(new Error("转码卡了 " + Math.round(STALL_MS / 1000) +
+                    " 秒一点进度都没有，浏览器已经把转码线程杀掉了（多半是内存不够）。" +
+                    "换个更短、更小的文件再试"));
+            }, 2000);
+
+            ff.run.apply(ff, args).then(function () {
+                clearInterval(timer);
+                if (dead) return;   // 已经 reject 过了，别再 resolve
+                var data = ff.FS("readFile", outputName);
+                var type = /\.jpe?g$/i.test(outputName) ? "image/jpeg" : "video/mp4";
+                /* readFile 返回的 Uint8Array 是 wasm 堆的视图，必须拷出来，
+                   否则下一次 run 会把它覆盖掉 */
+                var copy = new Uint8Array(data.length);
+                copy.set(data);
+                try { ff.FS("unlink", outputName); } catch (e) { /* 没有就算了 */ }
+                resolve(new Blob([copy], { type: type }));
+            }, function (err) {
+                clearInterval(timer);
+                if (dead) return;
+                reject(err instanceof Error ? err : new Error(String(err || "转码失败")));
+            });
         });
     }
 
@@ -240,10 +316,13 @@
             .then(function (engine) { ff = engine; })
             .then(function () {
                 onStage("读取视频信息", -1);
-                return probe(file).catch(function () { return meta; });
+                /* 这里不再吞掉错误：读不出画面信息的文件（HEVC/AV1/损坏）
+                   后面必然卡在 0%，当场报比等十分钟强 */
+                return probe(file);
             })
             .then(function (info) {
                 meta = info || meta;
+                precheck(file, meta);
                 onStage("把文件读进浏览器内存", 0);
                 return global.FFmpeg.fetchFile(file);
             })
@@ -316,11 +395,16 @@
         isolated: isolated,
         ensure: ensure,
         probe: probe,
+        precheck: precheck,
         compress: compress,
         scaleFilter: scaleFilter,
         estimate: estimate,
         fmtBytes: fmtBytes,
+        fmtDur: fmtDur,
         MAX_SOURCE: MAX_SOURCE,
+        MAX_DURATION: MAX_DURATION,
+        MAX_PIXEL_SECONDS: MAX_PIXEL_SECONDS,
+        STALL_MS: STALL_MS,
         TIERS: TIERS
     };
 })(window);
