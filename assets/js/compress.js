@@ -5,10 +5,15 @@
  * 这样服务器（GitHub 仓库）里永远只存两个几 MB 的小文件，
  * 高清原片一个字节都不上传。
  *
- * 引擎：ffmpeg.wasm 0.11（单线程 core，24MB，自托管在
- * assets/js/vendor/）。选 0.11 而不是 0.12 的原因：0.12 的 worker
- * 必须同源加载，跨域或子路径上很容易在别人的浏览器里静默失败；
+ * 引擎：ffmpeg.wasm 0.11（单线程 core，24MB）。选 0.11 而不是 0.12 的原因：
+ * 0.12 的 worker 必须同源加载，跨域或子路径上很容易在别人的浏览器里静默失败；
  * 0.11 用 blob 建 worker，稳。
+ *
+ * 引擎的三个文件（ffmpeg-core.js / .wasm / .worker.js）同时放在两处：
+ *   - 本仓库 assets/js/vendor/（兜底，永远可用）
+ *   - jsDelivr / unpkg 的 @ffmpeg/core@0.11.0（首选）
+ * 为什么不只用自托管：实测从 pages.dev 拉 24MB 只有 87KB/s，要下四五分钟；
+ * 同一台机器从 jsDelivr 拉是 21MB/s。所以优先 CDN，失败自动回退到本站。
  *
  * 对外 API：
  *   YowatCompress.supported()            当前浏览器能不能转码
@@ -27,7 +32,14 @@
 (function (global) {
     "use strict";
 
-    var CORE_PATH = "assets/js/vendor/ffmpeg-core.js";
+    /* 引擎下载源，按顺序试。why：自托管在 Pages 上拉 24MB 实测 87KB/s，
+       要四五分钟；jsDelivr 同机 21MB/s，1 秒就完。所以 CDN 优先，
+       所有 CDN 都不可用时才回退到本站那份（永远在，不会 404）。 */
+    var CORE_SOURCES = [
+        { url: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js", timeout: 45000, label: "jsDelivr" },
+        { url: "https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js", timeout: 45000, label: "unpkg" },
+        { url: "assets/js/vendor/ffmpeg-core.js", timeout: 300000, label: "本站" }
+    ];
 
     /** 两个档位：短边像素 + 画质。CRF 越大越糊越小，逐档 +2 与后端 tools/compress.mjs 一致 */
     var TIERS = [
@@ -60,6 +72,17 @@
        引擎加载
        ========================================================= */
 
+    /** 给 promise 套一个超时，卡住的下载源不要拖着整个流程 */
+    function withTimeout(p, ms) {
+        return new Promise(function (resolve, reject) {
+            var timer = setTimeout(function () {
+                reject(new Error("下载超时（" + Math.round(ms / 1000) + " 秒）"));
+            }, ms);
+            p.then(function (v) { clearTimeout(timer); resolve(v); },
+                function (e) { clearTimeout(timer); reject(e); });
+        });
+    }
+
     function ensure(onNote) {
         if (instance) return Promise.resolve(instance);
         if (loadingPromise) return loadingPromise;
@@ -70,29 +93,36 @@
 
         var note = typeof onNote === "function" ? onNote : function () {};
 
-        loadingPromise = new Promise(function (resolve, reject) {
-            note("正在加载转码引擎（约 24MB，第一次会慢一点，之后浏览器会缓存）");
+        function tryFrom(i) {
+            if (i >= CORE_SOURCES.length) {
+                loadingPromise = null;
+                return Promise.reject(new Error("转码引擎加载失败：所有下载源都连不上，检查网络后刷新重试"));
+            }
+
+            var src = CORE_SOURCES[i];
+            note("正在加载转码引擎（约 24MB，下载源 " + (i + 1) + "/" + CORE_SOURCES.length + "：" + src.label + "）");
 
             var ff;
             try {
                 ff = global.FFmpeg.createFFmpeg({
                     log: false,
-                    corePath: new URL(CORE_PATH, location.href).href
+                    corePath: new URL(src.url, location.href).href
                 });
             } catch (e) {
-                return reject(new Error("初始化转码引擎失败：" + e.message));
+                return tryFrom(i + 1);
             }
 
-            ff.load().then(function () {
+            return withTimeout(ff.load(), src.timeout).then(function () {
                 instance = ff;
                 note("转码引擎就绪");
-                resolve(ff);
+                return ff;
             }).catch(function (err) {
-                loadingPromise = null;
-                reject(new Error("转码引擎加载失败：" + (err && err.message ? err.message : "未知原因")));
+                console.warn("[yowat] 引擎源失败：" + src.label + " — " + (err && err.message ? err.message : err));
+                return tryFrom(i + 1);
             });
-        });
+        }
 
+        loadingPromise = tryFrom(0);
         return loadingPromise;
     }
 
