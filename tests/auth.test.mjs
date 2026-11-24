@@ -241,8 +241,7 @@ function fileRequest(cookie, fields = {}) {
     fd.append("description", fields.description || "简介");
     fd.append("tags", fields.tags || "日常,测试");
     fd.append("duration", String(fields.duration || 30));
-    fd.append("v360", new File([new Uint8Array(2048)], "360.mp4", { type: "video/mp4" }));
-    fd.append("v240", new File([new Uint8Array(1024)], "240.mp4", { type: "video/mp4" }));
+    fd.append("file", new File([new Uint8Array(2048)], "raw.mp4", { type: "video/mp4" }));
     fd.append("cover", new File([new Uint8Array(200)], "cover.jpg", { type: "image/jpeg" }));
 
     const headers = {};
@@ -280,15 +279,15 @@ let uploaded = null;
         check("返回播放地址", body.data && body.data.url === "/video/2", body.data && body.data.url);
 
         const paths = ghCalls.filter((c) => /\/git\/blobs$/.test(c.u)).length;
-        check("三个文件各建一个 blob", paths === 3, paths);
+        check("原片按 6MB 分块，每块建一个 blob（2KB 只有一块）", paths === 1, paths);
 
         const commits = ghCalls.filter((c) => /\/git\/commits$/.test(c.u) && c.method === "POST").length;
-        check("三个文件合成一次 commit（不浪费构建次数）", commits === 1, commits);
+        check("分块合成一次 commit（不浪费构建次数）", commits === 1, commits);
 
         const treeCall = ghCalls.find((c) => /\/git\/trees$/.test(c.u));
         const treeBody = treeCall ? JSON.parse(treeCall.body) : {};
         const treePaths = (treeBody.tree || []).map((t) => t.path).sort();
-        check("tree 里挂了三个路径", treePaths.join(",") === "videos/2/2-240.mp4,videos/2/2-360.mp4,videos/2/cover.jpg", treePaths.join(","));
+        check("tree 里挂的是 _raw/ 下的分块", treePaths.join(",") === "_raw/2.part00", treePaths.join(","));
 
         /* 落库检查 */
         const row = env._db.prepare("SELECT * FROM videos WHERE id = 2").get();
@@ -297,7 +296,7 @@ let uploaded = null;
         check("记录带 owner", row && Number(row.owner_id) > 0, row && row.owner_id);
         check("src/low 按 id 拼死", row && row.src === "videos/2/2-360.mp4" && row.low === "videos/2/2-240.mp4", row && row.src);
         check("vid = 11091 + id", row && Number(row.vid) === 11093, row && row.vid);
-        check("size 记的是 360p 体积", row && Number(row.size) === 2048, row && row.size);
+        check("size 记的是原片体积", row && Number(row.size) === 2048, row && row.size);
     } finally {
         restore();
     }

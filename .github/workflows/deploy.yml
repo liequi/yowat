@@ -14,6 +14,11 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # _raw/ 是用户上传的原片暂存区，由 transcode.yml 负责转码和部署。
+    # 这里必须忽略，否则同一笔上传会同时触发两次部署，
+    # 后完成的那次（不含新视频的）会把转码结果覆盖掉。
+    paths-ignore:
+      - "_raw/**"
   # 允许在 Actions 页面手动点一下重跑，不用改文件
   workflow_dispatch:
 

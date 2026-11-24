@@ -83,8 +83,8 @@
     <div style="max-width:720px;margin-bottom:8px">
         <h1 class="section__title" style="font-size:1.9rem">上传视频</h1>
         <p class="section__sub" style="margin-top:10px;line-height:1.8">
-            登录后把视频拖进来。压缩在<b>你自己的浏览器里</b>完成，传上去的只有 360p 和 240p 两个小文件，
-            高清原片不会离开你的电脑。
+            登录后把视频拖进来，选中就能传。<b>转码在服务器上跑</b>，你不用守着页面 ——
+            传完可以直接关掉，1~3 分钟后视频就上线了。
         </p>
     </div>
 
@@ -192,10 +192,10 @@
                         </div>
                         <div class="progress is-idle" id="progress"><div class="progress__bar" id="progressBar"></div></div>
                         <div class="job__steps">
-                            <span class="job__step" id="step1">1 压缩 360p</span>
-                            <span class="job__step" id="step2">2 压缩 240p</span>
-                            <span class="job__step" id="step3">3 上传</span>
-                            <span class="job__step" id="step4">4 等待上线</span>
+                            <span class="job__step" id="step1">1 上传原片</span>
+                            <span class="job__step" id="step2">2 服务器接收</span>
+                            <span class="job__step" id="step3">3 转码 360/240p</span>
+                            <span class="job__step" id="step4">4 上线</span>
                         </div>
                     </div>
 
@@ -210,13 +210,13 @@
             <div class="panel" style="margin-top:0">
                 <div class="panel__title">上传之后会发生什么</div>
                 <ol class="steps-list">
-                    <li>浏览器用 ffmpeg 把视频压成 <b>360p</b> 和 <b>240p</b>，顺便抽一张封面</li>
-                    <li>两个小文件和封面一起提交进站点仓库（只存低清，不存原片）</li>
-                    <li>Cloudflare Pages 自动重新构建，<b>大约 1~2 分钟</b>后视频就能播</li>
+                    <li>原片传到站点的临时区（<code>_raw/</code>，不会公开）</li>
+                    <li>服务器上的 <b>ffmpeg</b> 转出 <b>360p</b>、<b>240p</b> 和一张封面</li>
+                    <li>自动部署，<b>大约 1~3 分钟</b>后视频就能播，原片随后删除</li>
                 </ol>
                 <p style="margin-top:14px;font-size:.8rem;color:var(--muted);line-height:1.8">
-                    压缩要花点时间，取决于视频长度和你的电脑。4 分钟的视频大概 1~3 分钟，
-                    期间<b>别关这个页面</b>。手机上会更慢，建议连 WiFi。
+                    整个过程都在服务器上跑，<b>传完可以直接关页面</b>，手机上也不用一直开着。
+                    上限 32MB；想要更长或更高清，得等站点接上对象存储。
                 </p>
             </div>
 
@@ -249,8 +249,8 @@
                 <div class="hint">
                     <span>💡</span>
                     <span>
-                        转码引擎是 <code>ffmpeg.wasm</code>，约 24MB，第一次打开这个页面要下载一次，
-                        之后浏览器会缓存。压不动、报内存不足的话，把视频剪短一点再试。
+                        上传只需要传原片一次。转码交给服务器，所以 H.265/HEVC、MOV 这些
+                        浏览器放不出来的格式也能直接传 —— 服务器认得。
                     </span>
                 </div>
             </div>
@@ -274,8 +274,6 @@
 </footer>
 
 <script src="assets/js/yowat.js"></script>
-<script src="assets/js/vendor/ffmpeg.min.js"></script>
-<script src="assets/js/compress.js"></script>
 <script>
 /* 兜底：yowat.js 加载失败时也别让下面整段脚本挂掉
    （以前少了这个文件，`Yowat.ready` 直接 ReferenceError，上传框永远 hidden） */
@@ -318,7 +316,7 @@ Yowat.ready(function () {
         upload: "/api/upload"
     };
 
-    var MAX_SIZE = (window.YowatCompress ? YowatCompress.MAX_SOURCE : 220 * 1024 * 1024);
+    var MAX_SIZE = 32 * 1024 * 1024;
 
     var state = {
         me: null,
@@ -391,10 +389,6 @@ Yowat.ready(function () {
         el.uploadBox.hidden = false;
         el.whoName.textContent = state.me.username;
         renderQuota();
-
-        if (!YowatCompress || !YowatCompress.supported()) {
-            msg(el.errMsg, "这个浏览器不支持本地转码（需要 WebAssembly + Worker）。换 Chrome、Edge 或新版 Safari 再来。", "err");
-        }
     }
 
     function renderQuota() {
@@ -500,12 +494,12 @@ Yowat.ready(function () {
     function takeFile(file) {
         msg(el.fileErr, "");
 
-        var okType = /^video\//.test(file.type) || /\.(mp4|webm)$/i.test(file.name);
-        if (!okType) return msg(el.fileErr, "只支持 MP4 / WebM", "err");
+        var okType = /^video\//.test(file.type) || /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
+        if (!okType) return msg(el.fileErr, "只支持视频文件（MP4 / MOV / WebM / MKV）", "err");
         if (!file.size) return msg(el.fileErr, "这个文件是空的", "err");
         if (file.size > MAX_SIZE) {
-            return msg(el.fileErr, "文件 " + fmtBytes(file.size) + " 太大了，本地转码最多 " +
-                fmtBytes(MAX_SIZE) + "。剪短一点或换个小的再传", "err");
+            return msg(el.fileErr, "文件 " + fmtBytes(file.size) + " 太大了，上传上限 " +
+                fmtBytes(MAX_SIZE) + "。剪短一点或换个码率低的版本", "err");
         }
 
         state.file = file;
@@ -517,36 +511,29 @@ Yowat.ready(function () {
         el.pickedName.textContent = file.name;
         el.pickedMeta.textContent = fmtBytes(file.size);
         el.picked.classList.add("is-on");
+        msg(el.fileErr, "转码在服务器上做，传完可以直接关页面", "warn");
 
+        /* 元数据只是用来看个大概，读不出来也不影响上传：
+           H.265/HEVC、MOV 这些浏览器放不了，服务器上的 ffmpeg 照样认得 */
         el.preview.addEventListener("loadedmetadata", function handler() {
             el.preview.removeEventListener("loadedmetadata", handler);
             state.duration = Math.round(el.preview.duration) || 0;
             var w = el.preview.videoWidth || 0, h = el.preview.videoHeight || 0;
             el.pickedMeta.textContent = fmtBytes(file.size) + " · " + fmtDur(state.duration) +
                 " · " + w + "×" + h;
-            state.size = { width: w, height: h };
-
-            if (!YowatCompress) return;
-
-            /* 用引擎里的同一套规则预检，超限当场说清楚，别等人点了上传再干等 */
-            try {
-                YowatCompress.precheck(file, { width: w, height: h, duration: state.duration });
-                var est = YowatCompress.estimate(state.duration, YowatCompress.isolated());
-                msg(el.fileErr, "浏览器本地转码，上限 " +
-                    YowatCompress.fmtDur(YowatCompress.MAX_DURATION) + " / " +
-                    fmtBytes(YowatCompress.MAX_SOURCE) +
-                    (est ? "，这个视频" + est : "") + "。期间别关页面", "warn");
-            } catch (e) {
-                msg(el.fileErr, e.message, "err");
+            if (state.duration > 600) {
+                msg(el.fileErr, "这个视频 " + fmtDur(state.duration) +
+                    "，转码和部署会比较久（十几分钟），先传着也行，但建议剪短一点", "warn");
             }
         });
 
         el.preview.addEventListener("error", function () {
-            msg(el.fileErr, "浏览器读不出这个文件的画面，多半是 H.265/HEVC 编码（iPhone 默认就是）。先用剪辑软件导出成 H.264 的 MP4 再传", "err");
+            el.pickedMeta.textContent = fmtBytes(file.size) + " · 浏览器读不出时长";
+            msg(el.fileErr, "浏览器放不出这个格式没关系，服务器能转 —— 直接点上传就行", "warn");
         });
 
         if (!el.fTitle.value) {
-            el.fTitle.value = file.name.replace(/\.(mp4|webm)$/i, "").slice(0, 50);
+            el.fTitle.value = file.name.replace(/\.[^.]+$/, "").slice(0, 50);
         }
         syncCounts();
     }
@@ -640,7 +627,7 @@ Yowat.ready(function () {
     function setBusy(on) {
         state.busy = on;
         el.submit.disabled = on;
-        el.submit.textContent = on ? "正在处理，别关页面…" : "开始上传";
+        el.submit.textContent = on ? "正在上传…" : "开始上传";
         el.clearFile.disabled = on;
     }
 
@@ -654,9 +641,6 @@ Yowat.ready(function () {
 
         if (!state.file) return msg(el.fileErr, "先选一个视频", "err");
         if (!title) return msg(el.errMsg, "标题不能为空", "err");
-        if (!YowatCompress || !YowatCompress.supported()) {
-            return msg(el.errMsg, "这个浏览器不支持本地转码，换 Chrome / Edge / 新版 Safari", "err");
-        }
 
         msg(el.fileErr, "");
         msg(el.okMsg, "");
@@ -667,36 +651,17 @@ Yowat.ready(function () {
         resetSteps();
         el.jobPanel.hidden = false;
 
-        var t0 = Date.now();
-
-        setStage("准备转码引擎", -1);
         markStep(1);
+        setStage("上传原片", 0);
 
-        YowatCompress.compress(state.file, {
-            onNote: function (t) { el.stageNote.textContent = t; },
-            onStage: function (text, ratio) {
-                if (/360p/.test(text)) markStep(1);
-                else if (/240p/.test(text)) markStep(2);
-                else if (/封面|读取|内存/.test(text)) { /* 保持当前步骤 */ }
-                setStage(text, ratio);
-            }
-        })
-            .then(function (out) {
-                var cost = ((Date.now() - t0) / 1000).toFixed(0);
-                setStage("压缩完成，用时 " + cost + " 秒，开始上传", 1);
-                markStep(3);
-
-                return postUpload(out, title).then(function (res) {
-                    if (!res || res.code !== 0) {
-                        throw new Error((res && res.message) || "服务器没返回结果");
-                    }
-                    return { out: out, res: res };
-                });
-            })
-            .then(function (r) {
+        postUpload(title)
+            .then(function (res) {
+                if (!res || res.code !== 0) {
+                    throw new Error((res && res.message) || "服务器没返回结果");
+                }
                 markStep(4);
-                finishStage("已提交，等构建上线");
-                showResult(r.res.data, r.out);
+                finishStage("已提交，服务器正在转码");
+                showResult(res.data);
                 setBusy(false);
             })
             .catch(function (err) {
@@ -709,24 +674,28 @@ Yowat.ready(function () {
     });
 
     /** 用 XHR 是为了拿到上传百分比，fetch 没有这个事件 */
-    function postUpload(out, title) {
+    function postUpload(title) {
         return new Promise(function (resolve, reject) {
             var fd = new FormData();
             fd.append("title", title);
             fd.append("description", el.fDesc.value.trim());
             fd.append("tags", el.fTags.value.trim());
-            fd.append("duration", String((out.source && out.source.duration) || state.duration || 0));
-            fd.append("v360", out["360"].blob, "360.mp4");
-            fd.append("v240", out["240"].blob, "240.mp4");
-            if (out.cover && out.cover.blob) fd.append("cover", out.cover.blob, "cover.jpg");
+            fd.append("duration", String(state.duration || 0));
+            fd.append("file", state.file, state.file.name);
 
             var xhr = new XMLHttpRequest();
             xhr.open("POST", API.upload, true);
             xhr.withCredentials = true;
 
             xhr.upload.onprogress = function (e) {
-                if (e.lengthComputable) {
-                    setStage("上传 " + fmtBytes(e.loaded) + " / " + fmtBytes(e.total), e.loaded / e.total);
+                if (!e.lengthComputable) return;
+                var r = e.loaded / e.total;
+                setStage("上传原片 " + fmtBytes(e.loaded) + " / " + fmtBytes(e.total), r);
+                if (r >= 0.999) {
+                    markStep(2);
+                    /* 上传完还要等服务器把原片提交进仓库（几十秒），
+                       这里不能报"完成"，否则人会以为已经好了 */
+                    setStage("服务器接收中，别急着关…", 1);
                 }
             };
 
@@ -748,11 +717,11 @@ Yowat.ready(function () {
        结果
        ========================================================= */
 
-    function showResult(data, out) {
+    function showResult(data) {
         var link = location.origin + "/video/" + data.video_id;
 
         el.resId.textContent = "#" + data.video_id;
-        el.resStatus.textContent = "构建中（约 1~2 分钟）";
+        el.resStatus.textContent = "转码中（约 1~3 分钟）";
         el.resLink.textContent = "/video/" + data.video_id;
         el.resOpen.href = "/video/" + data.video_id;
         el.resultPanel.hidden = false;
@@ -764,13 +733,10 @@ Yowat.ready(function () {
             setTimeout(function () { el.btnCopyLink.textContent = "复制"; }, 1500);
         };
 
-        var sizes = [];
-        if (out && out["360"]) sizes.push("360p " + fmtBytes(out["360"].size));
-        if (out && out["240"]) sizes.push("240p " + fmtBytes(out["240"].size));
-
         msg(el.okMsg,
-            "上传成功：#" + data.video_id + "（" + sizes.join(" · ") + "）。" +
-            "文件正在构建，1~2 分钟后打开 /video/" + data.video_id + " 就能看了。",
+            "上传成功：#" + data.video_id + "（" + fmtBytes(data.size || 0) + "）。" +
+            "服务器正在转码，1~3 分钟后打开 /video/" + data.video_id +
+            " 就能看了 —— 现在可以直接关掉这个页面。",
             "ok");
 
         /* 配额就地更新，不用重新登录 */

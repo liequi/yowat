@@ -27,6 +27,10 @@ package-lock.json
 # 永远不进 CDN —— 站点上只有 -360.mp4 / -240.mp4 两个小文件。
 _incoming/
 
+# 网页上传的原片暂存区（分块 part00/part01…），由 Actions 的 transcode.yml
+# 拼回、转码、然后删掉。绝不能被部署成静态资源。
+_raw/
+
 # 历史遗留的归档目录（老的 --replace 用过），同样不发布
 _originals/
 
@@ -35,3 +39,8 @@ _originals/
 *.bak
 _*.html
 *.tmp.mp4
+
+# 浏览器端转码已经下线（转码搬到服务器上的 Actions 里），
+# 这两个文件只留着做单元测试，不用下发到 CDN —— 省 24MB 首屏流量。
+assets/js/vendor/
+assets/js/compress.js

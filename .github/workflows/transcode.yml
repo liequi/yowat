@@ -1,0 +1,136 @@
+# 服务器端转码：把上传页收到的原片转成 360p / 240p / 封面，再部署上线
+#
+# 为什么不在浏览器里转：ffmpeg.wasm 0.11 在 3 分钟级别的真实文件上会抛
+# `RuntimeError: function signature mismatch`（wasm 里直接崩，进度永远 0%），
+# 0.12 的 core 又是 31MB，部分网络下拉不下来。服务器上跑原生 ffmpeg，
+# 3 分钟视频十几秒就完，用户上传完可以直接关页面。
+#
+# 触发链：
+#   用户上传 → /api/upload 把原片分块提交到 _raw/ → push（这条路不触发 deploy.yml）
+#   → 本工作流：拼回原片 → ffmpeg 转码 → 提交 videos/{id}/ + 删 _raw → 部署
+#   → 播放页读接口 HEAD 探到文件存在，自动把状态从 processing 翻成 ready
+#
+# 注意：本工作流用 GITHUB_TOKEN push，GitHub 不会再触发其他 workflow，
+# 所以部署必须在本 job 里自己跑一次 wrangler。
+
+name: Transcode
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "_raw/**"
+  # 手动补跑：Actions 页面点 Run workflow
+  workflow_dispatch:
+
+# 转码要 push 回仓库
+permissions:
+  contents: write
+
+# 连着传两个视频时排队跑，别互相抢 ref
+concurrency:
+  group: transcode
+  cancel-in-progress: false
+
+jobs:
+  transcode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 确认 ffmpeg
+        run: ffmpeg -version | head -1
+
+      - name: 拼原片并转码
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          parts=(_raw/*.part*)
+          if [ ${#parts[@]} -eq 0 ]; then
+            echo "没有待转码的原片，直接退出"
+            exit 0
+          fi
+
+          # 文件名形如 _raw/12.part00，去掉 .partNN 就是视频 id
+          ids=$(ls _raw | sed -E 's/\.part[0-9]+$//' | sort -u)
+          echo "待处理：$ids"
+
+          for id in $ids; do
+            echo "=============================================="
+            echo "处理 #$id"
+
+            SRC=/tmp/src-$id.mp4
+            cat $(ls _raw/$id.part* | sort) > "$SRC"
+            echo "原片大小：$(du -h "$SRC" | cut -f1)"
+
+            W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of default=nw=1:nk=1 "$SRC" | head -1)
+            H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$SRC" | head -1)
+            DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$SRC" | head -1)
+
+            if [ -z "${W:-}" ] || [ -z "${H:-}" ]; then
+              echo "!! #$id 读不出画面，跳过（原片保留在 _raw/ 里等人工看）"
+              continue
+            fi
+
+            echo "尺寸 ${W}x${H}，时长 ${DUR}s"
+
+            # 短边决定要不要缩
+            if [ "$W" -le "$H" ]; then SH=$W; else SH=$H; fi
+
+            mkdir -p "videos/$id"
+
+            for spec in "360 30 64" "240 32 48"; do
+              set -- $spec
+              T=$1; CRF=$2; AB=$3
+              if [ "$SH" -gt "$T" ]; then VF=(-vf "scale=-2:$T"); else VF=(); fi
+              echo "→ ${T}p (crf $CRF)"
+              ffmpeg -y -hide_banner -loglevel error -i "$SRC" ${VF[@]+"${VF[@]}"} \
+                -c:v libx264 -crf "$CRF" -preset veryfast -profile:v main -pix_fmt yuv420p \
+                -c:a aac -b:a "${AB}k" -ac 2 -movflags +faststart \
+                "videos/$id/$id-$T.mp4"
+              echo "   $(du -h "videos/$id/$id-$T.mp4" | cut -f1)"
+            done
+
+            # 封面：第 25% 处，最多不超过第 5 秒（和原来打包器同一策略）
+            AT=$(awk -v d="${DUR:-1}" 'BEGIN{t=d*0.25; if(t>5)t=5; if(t<0.4)t=0.4; printf "%.2f", t}')
+            ffmpeg -y -hide_banner -loglevel error -ss "$AT" -i "$SRC" \
+              -frames:v 1 -vf "scale=720:-2" -q:v 3 "videos/$id/cover.jpg"
+            echo "   封面 $(du -h "videos/$id/cover.jpg" | cut -f1)"
+
+            rm -f _raw/$id.part*
+            echo "#$id 完成"
+          done
+
+      - name: 提交转码结果
+        run: |
+          set -euo pipefail
+          git config user.name  "yowat-bot"
+          git config user.email "yowat-bot@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "没有需要提交的变化"
+            exit 0
+          fi
+
+          git commit -m "自动转码：生成 360p / 240p / 封面并清理 _raw"
+          for i in 1 2 3; do
+            if git push; then break; fi
+            echo "push 失败（远端可能刚被人推过），重试第 $i 次"
+            sleep 5
+            git pull --rebase --autostash || true
+          done
+
+      - name: 部署到 Cloudflare Pages
+        run: npx --yes wrangler@4 pages deploy . --project-name yowat --branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CI: true
+
+      - name: 结果
+        run: echo "转码并部署完成 → https://yowat.pages.dev"
