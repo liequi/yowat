@@ -217,8 +217,8 @@
         }
         if (d > MAX_DURATION) {
             throw new Error("视频 " + fmtDur(d) + "，超过了 " + fmtDur(MAX_DURATION) +
-                " 的上限。转码是在你自己浏览器里单线程跑的，太长的视频能等十几分钟 —— 先剪到 " +
-                fmtDur(MAX_DURATION) + " 以内再传");
+                "的上限。转码是在你自己浏览器里单线程跑的，太长的视频能等十几分钟 —— 先剪到 " +
+                fmtDur(MAX_DURATION) + "以内再传");
         }
         if (w > 0 && h > 0 && w * h * d > MAX_PIXEL_SECONDS) {
             var allowed = Math.floor(MAX_PIXEL_SECONDS / (w * h));
