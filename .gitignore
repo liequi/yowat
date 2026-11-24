@@ -10,6 +10,7 @@ _originals/
 *.log
 *.bak
 *.tmp.mp4
+.token.tmp
 _*.html
 
 # 系统文件
