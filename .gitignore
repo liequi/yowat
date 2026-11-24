@@ -24,3 +24,7 @@ Thumbs.db
 # 浏览器调试缓存（做完自动化测试留下的）
 .edge-prof/
 _dom.html
+
+# 浏览器调试缓存（做完自动化测试留下的）
+.edge-prof/
+_dom.html
