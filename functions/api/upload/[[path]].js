@@ -159,13 +159,18 @@ async function uploadFiles(request, env, user, seg) {
     const vid = 11091 + id;
     const bytes = new Uint8Array(await file.arrayBuffer());
 
-    /* ---------- 原片切片提交到 _raw/（Actions 会拼回去转码） ---------- */
+    /* 每次上传一个独立目录：videos 表的 id 会被复用（删掉的记录让位给新视频），
+       如果直接写 _raw/3.part00，上一笔没收尾的残留就会和新文件拼成一个坏文件
+       —— 2026-11-26 那次 CI 失败就是这么来的。 */
+    const token = Math.random().toString(36).slice(2, 8);
+
+    /* ---------- 原片切片提交到 _raw/{id}-{token}/（Actions 会拼回去转码） ---------- */
     try {
         const files = [];
         for (let off = 0, n = 0; off < bytes.length; off += CHUNK, n++) {
             const slice = bytes.subarray(off, Math.min(off + CHUNK, bytes.length));
             files.push({
-                path: "_raw/" + id + ".part" + String(n).padStart(2, "0"),
+                path: "_raw/" + id + "-" + token + "/part" + String(n).padStart(2, "0"),
                 base64: toBase64(slice)
             });
         }

@@ -83,7 +83,9 @@ jobs:
           done
 
       - name: 提交转码结果
-        if: success()
+        # 一个批次里可能有一个成功一个失败：成功的也要提交上去，
+        # 所以这里不能挂在 success() 上。
+        if: always()
         run: |
           set -euo pipefail
           git config user.name  "yowat-bot"

@@ -14,7 +14,7 @@
  *   node tools/transcode-ci.mjs --keep     # 保留 _raw（调试用）
  */
 
-import { readdir, readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir, unlink, rmdir, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -40,26 +40,69 @@ function log(...a) {
     console.log("[" + new Date().toISOString().slice(11, 19) + "]", ...a);
 }
 
-/** 把 _raw 里的分块按 id 分组，组内按 partNN 排序 */
+/**
+ * 扫 _raw/，把要转码的原片分组。
+ *
+ * 现在的上传接口写的是 `_raw/{id}-{token}/partNN`（每次上传一个独立目录）：
+ * videos 表的 id 会被复用，平铺成 `_raw/{id}.partNN` 时，上一笔没收尾的残留
+ * 会和新的 part00 拼成坏文件 —— 2026-11-26 那次 CI 失败的原因就是这个。
+ * 平铺格式仍然兼容，用来处理历史遗留。
+ *
+ * 返回 Map<group, { id, dir, files: [] }>，files 是相对 _raw 的路径。
+ */
 async function collect() {
-    let names;
+    let entries;
     try {
-        names = await readdir(RAW);
+        entries = await readdir(RAW, { withFileTypes: true });
     } catch (e) {
         return new Map();
     }
 
-    const map = new Map();
-    for (const name of names) {
-        const m = /^(\d+)\.part(\d+)$/.exec(name);
+    const groups = new Map();
+
+    for (const e of entries) {
+        if (e.isDirectory()) {
+            const m = /^(\d+)-[a-z0-9]+$/i.exec(e.name);
+            if (!m) continue;
+
+            let inside;
+            try {
+                inside = await readdir(path.join(RAW, e.name));
+            } catch (err) {
+                continue;
+            }
+
+            const parts = inside
+                .filter((n) => /^part\d+$/.test(n))
+                .sort((a, b) => Number(/\d+/.exec(a)[0]) - Number(/\d+/.exec(b)[0]));
+
+            if (parts.length) {
+                groups.set(e.name, {
+                    id: Number(m[1]),
+                    dir: e.name,
+                    files: parts.map((n) => e.name + "/" + n)
+                });
+            }
+            continue;
+        }
+
+        /* 历史遗留的平铺格式：_raw/3.part00 */
+        const m = /^(\d+)\.part(\d+)$/.exec(e.name);
         if (!m) continue;
-        const id = Number(m[1]);
-        if (!map.has(id)) map.set(id, []);
-        map.get(id).push({ name, seq: Number(m[2]) });
+        const key = "#" + m[1];
+        if (!groups.has(key)) groups.set(key, { id: Number(m[1]), dir: null, files: [] });
+        groups.get(key).files.push({ name: e.name, seq: Number(m[2]) });
     }
 
-    for (const list of map.values()) list.sort((a, b) => a.seq - b.seq);
-    return new Map([...map.entries()].sort((a, b) => a[0] - b[0]));
+    /* 平铺组按序号排好，去掉临时字段 */
+    for (const g of groups.values()) {
+        if (g.dir === null) {
+            g.files.sort((a, b) => a.seq - b.seq);
+            g.files = g.files.map((f) => f.name);
+        }
+    }
+
+    return new Map([...groups.entries()].sort((a, b) => a[1].id - b[1].id));
 }
 
 async function ffprobe(src) {
@@ -88,18 +131,40 @@ function scaleFilter(w, h, target) {
     return w >= h ? "scale=-2:" + target : "scale=" + target + ":-2";
 }
 
-async function transcodeOne(id, parts) {
+async function transcodeOne(group) {
+    const id = group.id;
+    const parts = group.files;
     const src = path.join(tmpdir(), "yowat-src-" + id + ".mp4");
 
     const chunks = [];
     for (const p of parts) {
-        chunks.push(await readFile(path.join(RAW, p.name)));
+        chunks.push(await readFile(path.join(RAW, p)));
     }
     await writeFile(src, Buffer.concat(chunks));
 
     const size = (await stat(src)).size;
     log("#" + id, "拼回原片", (size / 1048576).toFixed(1) + "MB，共 " + parts.length + " 块");
 
+    const written = [];
+    try {
+        await encode(id, src, written);
+    } catch (e) {
+        /* 转了一半失败的话，别把残档留在 videos/ 里让页面播到半截 */
+        for (const f of written) await unlink(f).catch(() => {});
+        await unlink(src).catch(() => {});
+        throw e;
+    }
+
+    await unlink(src).catch(() => {});
+
+    if (!KEEP) {
+        for (const p of parts) await unlink(path.join(RAW, p)).catch(() => {});
+        if (group.dir) await rmdir(path.join(RAW, group.dir)).catch(() => {});
+    }
+}
+
+/** 真正的转码：两个档位 + 封面，全部成功后写进 videos/{id}/ */
+async function encode(id, src, written) {
     let meta;
     try {
         meta = await ffprobe(src);
@@ -145,6 +210,7 @@ async function transcodeOne(id, parts) {
             }
 
             const got = (await stat(outFile)).size;
+            written.push(outFile);
             log("#" + id, "→ " + tier.height + "p（crf " + crf + "）", (got / 1048576).toFixed(2) + "MB",
                 "用时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s");
 
@@ -174,12 +240,6 @@ async function transcodeOne(id, parts) {
     } catch (e) {
         log("#" + id, "!! 封面失败（不影响播放）：" + (e.stderr || e.message || e));
     }
-
-    await unlink(src).catch(() => {});
-
-    if (!KEEP) {
-        for (const p of parts) await unlink(path.join(RAW, p.name)).catch(() => {});
-    }
 }
 
 async function main() {
@@ -190,15 +250,15 @@ async function main() {
         return;
     }
 
-    log("待处理：" + [...map.keys()].map((i) => "#" + i).join("、"));
+    log("待处理：" + [...map.values()].map((g) => "#" + g.id + "（" + g.files.length + " 块）").join("、"));
 
     let failed = 0;
-    for (const [id, parts] of map) {
+    for (const [key, group] of map) {
         try {
-            await transcodeOne(id, parts);
+            await transcodeOne(group);
         } catch (e) {
             failed++;
-            log("#" + id, "!! 失败：" + (e && e.message ? e.message : e));
+            log("#" + group.id, "!! 失败（" + key + "）：" + (e && e.message ? e.message : e));
         }
     }
 
