@@ -243,6 +243,16 @@ async function encode(id, src, written) {
 }
 
 async function main() {
+    /* 先确认工具在不在：runner 上没有 ffmpeg 时，报错会是一句
+       "spawn ffmpeg ENOENT"，看不出是环境问题还是文件问题 */
+    for (const bin of ["ffmpeg", "ffprobe"]) {
+        try {
+            await run(bin, ["-version"]);
+        } catch (e) {
+            throw new Error("这台机器上没有 " + bin + "，先把 ffmpeg 装上再跑（apt-get install -y ffmpeg）");
+        }
+    }
+
     const map = await collect();
 
     if (map.size === 0) {

@@ -46,11 +46,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: 确认 ffmpeg
-        # 缺 ffprobe 的话整条流水线都读不出视频尺寸，这里先看清楚
+      - name: 装 ffmpeg
+        # 这台 runner 上并没有预装 ffmpeg。之前那步写成
+        # `ffmpeg -version | head -1`，命令不存在时退出码被管道吃掉了，
+        # 于是显示"成功"，等到 ffprobe 那步才挂，还查不到原因。
         run: |
-          which ffmpeg ffprobe
-          ffmpeg -version  | head -1
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg  -version | head -1
           ffprobe -version | head -1
 
       - name: 拼原片并转码
