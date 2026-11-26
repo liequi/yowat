@@ -31,6 +31,9 @@ _incoming/
 # 拼回、转码、然后删掉。绝不能被部署成静态资源。
 _raw/
 
+# CI 失败时留下的日志（transcode.yml 写的），只给开发者看
+_ci/
+
 # 历史遗留的归档目录（老的 --replace 用过），同样不发布
 _originals/
 

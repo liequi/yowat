@@ -52,9 +52,38 @@ jobs:
       - name: 拼原片并转码
         # 逻辑全在 Node 脚本里：bash 出错时从 Actions 日志看不出是哪条命令挂的，
         # 而且这个脚本本地就能原样跑一遍验证。
-        run: node tools/transcode-ci.mjs
+        run: |
+          node tools/transcode-ci.mjs 2>&1 | tee "$RUNNER_TEMP/transcode.log"
+
+      # 仓库是 public，但 Actions 的日志接口要仓库写权限才给读。
+      # 失败时把日志尾巴提交进 _ci/，这样不用登录也能看到到底哪一行挂了。
+      - name: 失败时把日志留在仓库里
+        if: failure()
+        run: |
+          set -uo pipefail
+          mkdir -p _ci
+          {
+            echo "# 转码失败 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo
+            echo "提交：\`${GITHUB_SHA}\`　运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo '```'
+            tail -c 20000 "$RUNNER_TEMP/transcode.log" 2>/dev/null || echo "没抓到日志"
+            echo '```'
+          } > _ci/last-error.md
+
+          git config user.name  "yowat-bot"
+          git config user.email "yowat-bot@users.noreply.github.com"
+          git add _ci
+          git commit -m "CI 日志：转码失败" || exit 0
+          for i in 1 2 3; do
+            if git push; then break; fi
+            sleep 3
+            git pull --rebase --autostash || true
+          done
 
       - name: 提交转码结果
+        if: success()
         run: |
           set -euo pipefail
           git config user.name  "yowat-bot"
