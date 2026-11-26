@@ -47,40 +47,24 @@ jobs:
           node-version: 22
 
       - name: 确认 ffmpeg
-        run: ffmpeg -version | head -1
+        # 缺 ffprobe 的话整条流水线都读不出视频尺寸，这里先看清楚
+        run: |
+          which ffmpeg ffprobe
+          ffmpeg -version  | head -1
+          ffprobe -version | head -1
 
       - name: 拼原片并转码
         # 逻辑全在 Node 脚本里：bash 出错时从 Actions 日志看不出是哪条命令挂的，
         # 而且这个脚本本地就能原样跑一遍验证。
+        #
+        # set -o pipefail 不能少：`node ... | tee` 的退出码是 tee 的，
+        # 没有它 node 崩了这一步照样显示成功（2026-11-26 就这么被瞒过一次）。
+        # 日志同时写进 _ci/last-run.md，由下面的提交步骤一起推上去 ——
+        # GitHub 的 Actions 日志接口要仓库写权限，我们读不到。
         run: |
-          node tools/transcode-ci.mjs 2>&1 | tee "$RUNNER_TEMP/transcode.log"
-
-      # 仓库是 public，但 Actions 的日志接口要仓库写权限才给读。
-      # 失败时把日志尾巴提交进 _ci/，这样不用登录也能看到到底哪一行挂了。
-      - name: 失败时把日志留在仓库里
-        if: failure()
-        run: |
-          set -uo pipefail
+          set -o pipefail
           mkdir -p _ci
-          {
-            echo "# 转码失败 $(date -u '+%Y-%m-%d %H:%M UTC')"
-            echo
-            echo "提交：\`${GITHUB_SHA}\`　运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo
-            echo '```'
-            tail -c 20000 "$RUNNER_TEMP/transcode.log" 2>/dev/null || echo "没抓到日志"
-            echo '```'
-          } > _ci/last-error.md
-
-          git config user.name  "yowat-bot"
-          git config user.email "yowat-bot@users.noreply.github.com"
-          git add _ci
-          git commit -m "CI 日志：转码失败" || exit 0
-          for i in 1 2 3; do
-            if git push; then break; fi
-            sleep 3
-            git pull --rebase --autostash || true
-          done
+          node tools/transcode-ci.mjs 2>&1 | tee _ci/last-run.md
 
       - name: 提交转码结果
         # 一个批次里可能有一个成功一个失败：成功的也要提交上去，
@@ -106,6 +90,8 @@ jobs:
           done
 
       - name: 部署到 Cloudflare Pages
+        # 一批里只要有一个转码成功就得部署，所以不挂在 success() 上
+        if: always()
         run: npx --yes wrangler@4 pages deploy . --project-name yowat --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
